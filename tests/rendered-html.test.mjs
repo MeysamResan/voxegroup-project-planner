@@ -45,9 +45,14 @@ test("starts with pricing omitted from the fail-closed planning render", async (
   assert.match(html, /Planning mode/i);
   assert.match(html, /\bImport\b/i);
   assert.match(html, /Pricing controls hidden/i);
+  assert.match(html, /Project settings/i);
+  assert.match(html, /Effort adjustments/i);
   assert.match(html, /aria-label="Project start date"[^>]*aria-haspopup="dialog"/i);
   assert.doesNotMatch(html, /type="date"/i);
+  assert.doesNotMatch(html, /elastic-(?:pair|panel)|dragging-person/i);
+  assert.doesNotMatch(html, /\b0[1-5]\s*•/);
   assert.doesNotMatch(html, /Local only|Saved on this device|>\s*(?:Pricing|Planning) Studio\s*</i);
+  assert.doesNotMatch(html, /id="expenses-settings-title"/i);
   assert.doesNotMatch(
     html,
     /Client quote|Estimated cost|Gross profit|Financial pulse|Estimated investment|Internal hourly cost|Cloud development environment|AI sandbox usage|AI integration complexity/i,

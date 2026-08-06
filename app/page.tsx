@@ -100,12 +100,9 @@ type ProjectPlan = {
   projectName: string;
   currency: Currency;
   startDate: string;
-  clientRate: number;
+  baseHourlyPrice: number;
   fixedFee: number;
   defaultHours: number;
-  targetMargin: number;
-  riskReserve: number;
-  rounding: number;
   workingDays: number[];
   holidays: string[];
   phases: Phase[];
@@ -117,7 +114,7 @@ type ProjectPlan = {
 
 type Workspace = {
   app: "voxe-pricing-studio";
-  schemaVersion: 2;
+  schemaVersion: 3;
   people: Person[];
   project: ProjectPlan;
 };
@@ -196,18 +193,15 @@ const initialWorkspace = (): Workspace => {
 
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 2,
+    schemaVersion: 3,
     people: [designer, developer, qa, aiContractor],
     project: {
         projectName: "Customer Operations Platform",
         currency: "USD",
         startDate: "2026-08-09",
-        clientRate: 55,
+        baseHourlyPrice: 55,
         fixedFee: 1500,
         defaultHours: 6,
-        targetMargin: 35,
-        riskReserve: 15,
-        rounding: 100,
         workingDays: [0, 1, 2, 3, 4],
         holidays: [],
         phases: [
@@ -279,13 +273,6 @@ const initialWorkspace = (): Workspace => {
       },
   };
 };
-
-const numberValue = (value: string) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const initials = (name: string) =>
   name
@@ -359,7 +346,7 @@ const currencyFormat = (currency: Currency, value: number, compact = false) =>
     style: "currency",
     currency,
     notation: compact && Math.abs(value) >= 100000 ? "compact" : "standard",
-    maximumFractionDigits: currency === "IQD" ? 0 : 0,
+    maximumFractionDigits: currency === "IQD" ? 0 : 2,
   }).format(Number.isFinite(value) ? value : 0);
 
 const unitLabels: Record<ExpenseUnit, string> = {
@@ -443,7 +430,7 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
       rawHours: raw.rawHours,
       adjustedHours,
       laborCost: Math.max(0, raw.rawCost * effortMultiplier + fixedEffortHours * share * averageRate),
-      revenue: adjustedHours * scenario.clientRate,
+      revenue: adjustedHours * scenario.baseHourlyPrice,
       start: raw.start,
       end: raw.end,
     };
@@ -481,7 +468,7 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
 
   const expenseCost = expenseResults.reduce((sum, expense) => sum + expense.cost, 0);
   const billableExpenses = expenseResults.reduce((sum, expense) => sum + expense.billable, 0);
-  const baseRevenue = Math.max(0, scenario.fixedFee + totalHours * scenario.clientRate);
+  const baseRevenue = Math.max(0, scenario.fixedFee + totalHours * scenario.baseHourlyPrice);
   const pricePercent = scenario.modifiers
     .filter((modifier) => modifier.target === "price" && modifier.kind === "percentage")
     .reduce((sum, modifier) => sum + modifier.value, 0);
@@ -489,20 +476,13 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
     .filter((modifier) => modifier.target === "price" && modifier.kind === "fixed")
     .reduce((sum, modifier) => sum + modifier.value, 0);
   const modifierRevenue = baseRevenue * (pricePercent / 100) + fixedPriceModifiers;
-  const unroundedQuote = Math.max(
+  const quote = Math.max(
     0,
     baseRevenue + modifierRevenue + billableExpenses + scenario.manualAdjustment,
   );
-  const rounding = Math.max(1, scenario.rounding || 1);
-  const quote = Math.round(unroundedQuote / rounding) * rounding;
   const estimatedCost = laborCost + expenseCost;
-  const riskAdjustedCost = estimatedCost * (1 + Math.max(0, scenario.riskReserve) / 100);
-  const targetMargin = clamp(scenario.targetMargin, 0, 95) / 100;
-  const safePrice = targetMargin < 1 ? riskAdjustedCost / (1 - targetMargin) : riskAdjustedCost;
   const grossProfit = quote - estimatedCost;
-  const guardedProfit = quote - riskAdjustedCost;
   const grossMargin = quote > 0 ? (grossProfit / quote) * 100 : 0;
-  const guardedMargin = quote > 0 ? (guardedProfit / quote) * 100 : 0;
 
   const planningWarnings: string[] = [];
   const pricingWarnings: string[] = [];
@@ -512,8 +492,7 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
   if (scenario.phases.some((phase) => phase.assignments.some((assignment) => assignment.hoursPerDay > 24))) {
     planningWarnings.push("An assignment exceeds 24 hours per day.");
   }
-  if (quote < safePrice) pricingWarnings.push("The quote is below the risk-adjusted target margin.");
-  if (guardedProfit < 0) pricingWarnings.push("The quote is loss-making after the risk reserve.");
+  if (grossProfit < 0) pricingWarnings.push("The quote is below estimated project cost.");
 
   return {
     rawHours,
@@ -521,16 +500,12 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
     laborCost,
     expenseCost,
     estimatedCost,
-    riskAdjustedCost,
     billableExpenses,
     baseRevenue,
     modifierRevenue,
     quote,
     grossProfit,
-    guardedProfit,
     grossMargin,
-    guardedMargin,
-    safePrice,
     totalWorkingDays,
     calendarDays,
     projectStart,
@@ -543,9 +518,9 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
   };
 }
 
-const isProjectPlan = (value: unknown): value is ProjectPlan => {
+const isProjectPlan = (value: unknown): value is Record<string, unknown> => {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<ProjectPlan>;
+  const candidate = value as Record<string, unknown>;
   return (
     typeof candidate.projectName === "string" &&
     typeof candidate.startDate === "string" &&
@@ -556,6 +531,26 @@ const isProjectPlan = (value: unknown): value is ProjectPlan => {
     Array.isArray(candidate.expenses) &&
     Array.isArray(candidate.modifiers)
   );
+};
+
+const normalizeProjectPlan = (value: unknown): ProjectPlan | null => {
+  if (!isProjectPlan(value)) return null;
+  const project = { ...value };
+  const baseHourlyPrice = typeof project.baseHourlyPrice === "number"
+    ? project.baseHourlyPrice
+    : typeof project.clientRate === "number"
+      ? project.clientRate
+      : 0;
+
+  project.baseHourlyPrice = Number.isFinite(baseHourlyPrice) ? baseHourlyPrice : 0;
+  delete project.clientRate;
+  delete project.targetMargin;
+  delete project.riskReserve;
+  delete project.rounding;
+  delete project.id;
+  delete project.name;
+
+  return project as unknown as ProjectPlan;
 };
 
 const normalizeWorkspace = (value: unknown): Workspace | null => {
@@ -569,8 +564,8 @@ const normalizeWorkspace = (value: unknown): Workspace | null => {
   };
   if (candidate.app !== "voxe-pricing-studio" || !Array.isArray(candidate.people)) return null;
 
-  let project = candidate.project;
-  if (!isProjectPlan(project)) {
+  let project = normalizeProjectPlan(candidate.project);
+  if (!project) {
     if (!Array.isArray(candidate.scenarios) || !candidate.scenarios.length) return null;
     const activeProject = candidate.scenarios.find((item) => (
       item &&
@@ -578,17 +573,13 @@ const normalizeWorkspace = (value: unknown): Workspace | null => {
       "id" in item &&
       item.id === candidate.activeScenarioId
     )) ?? candidate.scenarios[0];
-    if (!isProjectPlan(activeProject)) return null;
-    const migratedProject = { ...activeProject } as Record<string, unknown>;
-    delete migratedProject.id;
-    delete migratedProject.name;
-    project = migratedProject;
+    project = normalizeProjectPlan(activeProject);
   }
-  if (!isProjectPlan(project)) return null;
+  if (!project) return null;
 
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 2,
+    schemaVersion: 3,
     people: candidate.people as Person[],
     project,
   };
@@ -1922,12 +1913,12 @@ export default function Home() {
               <>
                 <article className="metric-card glass-panel featured">
                   <div className="metric-icon"><CircleDollarSign size={20} /></div>
-                  <div><span>Client quote</span><strong>{currencyFormat(scenario.currency, calculation.quote, true)}</strong><small>Rounded to {currencyFormat(scenario.currency, scenario.rounding)}</small></div>
+                  <div><span>Client quote</span><strong>{currencyFormat(scenario.currency, calculation.quote, true)}</strong><small>{currencyFormat(scenario.currency, scenario.baseHourlyPrice)} base price / hour</small></div>
                   <TrendingUp size={18} className="metric-corner" />
                 </article>
                 <article className="metric-card glass-panel">
                   <div className="metric-icon violet"><WalletCards size={20} /></div>
-                  <div><span>Estimated cost</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost, true)}</strong><small>{currencyFormat(scenario.currency, calculation.riskAdjustedCost)} with risk</small></div>
+                  <div><span>Estimated cost</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost, true)}</strong><small>Labor and internal expenses</small></div>
                 </article>
                 <article className="metric-card glass-panel">
                   <div className="metric-icon green"><TrendingUp size={20} /></div>
@@ -1950,13 +1941,13 @@ export default function Home() {
 
           <section className="settings-card glass-panel">
             <div className="section-heading">
-              <div><h2 className="eyebrow section-index-title">01 • Project settings</h2></div>
+              <div className="section-title-block"><h2 className="eyebrow section-kicker">Project settings</h2></div>
             </div>
             <div className="settings-layout">
               <section className="settings-column commercial-settings" aria-labelledby="commercial-settings-title">
                 <div className="settings-column-heading">
                   <span className="settings-column-icon commercial" aria-hidden="true"><CircleDollarSign size={18} /></span>
-                  <div><h3 id="commercial-settings-title">Commercial</h3><small>Rates, fees and margin controls</small></div>
+                  <div><h3 id="commercial-settings-title">Commercial</h3><small>Base pricing and project fees</small></div>
                 </div>
                 {planningMode ? (
                   <div className="pricing-hidden-state">
@@ -1979,19 +1970,8 @@ export default function Home() {
                         onChange={(currency) => updateScenario({ currency: currency as Currency })}
                       />
                     </label>
-                    <MoneyInput label="Client rate" value={scenario.clientRate} onChange={(clientRate) => updateScenario({ clientRate })} suffix="/ person-hour" min={0} />
+                    <MoneyInput label="Base price / hour" value={scenario.baseHourlyPrice} onChange={(baseHourlyPrice) => updateScenario({ baseHourlyPrice })} suffix={scenario.currency + "/h"} min={0} />
                     <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} step={50} />
-                    <MoneyInput label="Target gross margin" value={scenario.targetMargin} onChange={(targetMargin) => updateScenario({ targetMargin })} suffix="%" min={0} max={95} />
-                    <MoneyInput label="Risk reserve" value={scenario.riskReserve} onChange={(riskReserve) => updateScenario({ riskReserve })} suffix="%" min={0} />
-                    <label className="field">
-                      <span>Rounding</span>
-                      <GlassSelect
-                        ariaLabel="Quote rounding"
-                        value={String(scenario.rounding)}
-                        options={[1, 50, 100, 500, 1000, 100000].map((value) => ({ value: String(value), label: currencyFormat(scenario.currency, value) }))}
-                        onChange={(rounding) => updateScenario({ rounding: numberValue(rounding) })}
-                      />
-                    </label>
                   </div>
                 )}
               </section>
@@ -2067,11 +2047,65 @@ export default function Home() {
                 </div>
               </section>
             </div>
+
+            <div className={"settings-extensions" + (planningMode ? " is-single" : "")}>
+              <section className="settings-column settings-subpanel modifier-settings" aria-labelledby="modifiers-settings-title">
+                <div className="settings-column-heading">
+                  <span className="settings-column-icon schedule" aria-hidden="true"><Sparkles size={18} /></span>
+                  <div>
+                    <h3 id="modifiers-settings-title">{planningMode ? "Effort adjustments" : "Modifiers"}</h3>
+                    <small>{planningMode ? "Adjust delivery effort without exposing price" : "Price and effort adjustments"}</small>
+                  </div>
+                  <button type="button" className="icon-button accent settings-panel-action" aria-label={planningMode ? "Add effort adjustment" : "Add modifier"} onClick={addModifier}><Plus size={17} /></button>
+                </div>
+                <div className="data-list">
+                  {visibleModifiers.map((modifier) => (
+                    <div className="data-row modifier-row" key={modifier.id}>
+                      <input className="row-name" aria-label={modifier.name + " name"} value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
+                      {planningMode
+                        ? <span className="modifier-target-chip"><Clock3 size={13} /> Effort</span>
+                        : <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />}
+                      <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
+                      <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
+                      <button type="button" className="icon-button danger" aria-label={"Remove " + modifier.name} onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                  {!visibleModifiers.length && <div className="empty-inline">{planningMode ? "No effort adjustments" : "No price or effort modifiers"}</div>}
+                </div>
+              </section>
+
+              {!planningMode && (
+                <section className="settings-column settings-subpanel expense-settings" aria-labelledby="expenses-settings-title">
+                  <div className="settings-column-heading">
+                    <span className="settings-column-icon commercial" aria-hidden="true"><WalletCards size={18} /></span>
+                    <div><h3 id="expenses-settings-title">Expenses</h3><small>Internal, pass-through and marked-up costs</small></div>
+                    <button type="button" className="icon-button accent settings-panel-action" aria-label="Add expense" onClick={addExpense}><Plus size={17} /></button>
+                  </div>
+                  <div className="data-list">
+                    {scenario.expenses.map((expense) => {
+                      const result = expenseResult(expense.id);
+                      return (
+                        <div className="data-row expense-row" key={expense.id}>
+                          <input className="row-name" aria-label={expense.name + " name"} value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
+                          <NumberStepper compact ariaLabel={expense.name + " amount"} value={expense.amount} min={0} step={1} suffix={scenario.currency} onChange={(amount) => updateExpense(expense.id, { amount })} />
+                          <GlassSelect ariaLabel={expense.name + " unit"} value={expense.unit} options={Object.entries(unitLabels).map(([value, label]) => ({ value, label }))} onChange={(unit) => updateExpense(expense.id, { unit: unit as ExpenseUnit })} />
+                          <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
+                          {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
+                          <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
+                          <button type="button" className="icon-button danger" aria-label={"Remove " + expense.name} onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
+                        </div>
+                      );
+                    })}
+                    {!scenario.expenses.length && <div className="empty-inline">No additional expenses</div>}
+                  </div>
+                </section>
+              )}
+            </div>
           </section>
 
           <section className="phases-card glass-panel">
             <div className="section-heading">
-              <div><p className="eyebrow section-index-title">02 • Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
+              <div className="section-title-block"><p className="eyebrow section-kicker">Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
               <button className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>
             </div>
             <div className="delivery-workspace">
@@ -2093,6 +2127,7 @@ export default function Home() {
                         event.dataTransfer.setData("application/x-voxe-person", person.id);
                         event.dataTransfer.effectAllowed = "copy";
                       }}
+                      onDragEnd={() => setDragOverPhase(null)}
                       onClick={() => { setEditingPerson(person); setIsNewPerson(false); }}
                     >
                       <span className="person-card-avatar">{initials(person.name)}</span>
@@ -2168,62 +2203,19 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="detail-grid">
-            {!planningMode && (
-              <article className="detail-card glass-panel">
-                <div className="section-heading compact"><div><p className="eyebrow section-index-title">03 • Cost layer</p><h2>Expenses</h2></div><button className="icon-button accent" onClick={addExpense}><Plus size={17} /></button></div>
-                <div className="data-list">
-                  {scenario.expenses.map((expense) => {
-                    const result = expenseResult(expense.id);
-                    return (
-                      <div className="data-row expense-row" key={expense.id}>
-                        <input className="row-name" value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
-                        <NumberStepper compact ariaLabel={expense.name + " amount"} value={expense.amount} min={0} step={1} suffix={scenario.currency} onChange={(amount) => updateExpense(expense.id, { amount })} />
-                        <GlassSelect ariaLabel={expense.name + " unit"} value={expense.unit} options={Object.entries(unitLabels).map(([value, label]) => ({ value, label }))} onChange={(unit) => updateExpense(expense.id, { unit: unit as ExpenseUnit })} />
-                        <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
-                        {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
-                        <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
-                        <button className="icon-button danger" onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
-                      </div>
-                    );
-                  })}
-                  {!scenario.expenses.length && <div className="empty-inline">No additional expenses</div>}
-                </div>
-              </article>
-            )}
-
-            <article className="detail-card glass-panel">
-              <div className="section-heading compact"><div><p className="eyebrow section-index-title">{planningMode ? "03 • Planning layer" : "04 • Adjustments"}</p><h2>{planningMode ? "Effort adjustments" : "Modifiers"}</h2></div><button className="icon-button accent" onClick={addModifier}><Plus size={17} /></button></div>
-              <div className="data-list">
-                {visibleModifiers.map((modifier) => (
-                  <div className="data-row modifier-row" key={modifier.id}>
-                    <input className="row-name" value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
-                    {planningMode
-                      ? <span className="modifier-target-chip"><Clock3 size={13} /> Effort</span>
-                      : <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />}
-                    <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
-                    <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
-                    <button className="icon-button danger" onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
-                  </div>
-                ))}
-                {!visibleModifiers.length && <div className="empty-inline">{planningMode ? "No effort adjustments" : "No price or effort modifiers"}</div>}
-              </div>
-            </article>
-          </section>
-
           {!planningMode && <section className="financial-card glass-panel">
-            <div className="section-heading"><div><p className="eyebrow section-index-title">05 • Decision</p><h2>Financial pulse</h2><p>The safe price uses estimated cost, the risk reserve, and your target gross margin.</p></div><span className={"safety-badge " + (calculation.quote >= calculation.safePrice ? "safe" : "unsafe")}>{calculation.quote >= calculation.safePrice ? <Check size={15} /> : <AlertTriangle size={15} />}{calculation.quote >= calculation.safePrice ? "Target protected" : "Below target"}</span></div>
+            <div className="section-heading"><div className="section-title-block"><p className="eyebrow section-kicker">Decision</p><h2>Financial pulse</h2><p>Compare the final quote with estimated delivery cost and actual gross profit.</p></div><span className={"safety-badge " + (calculation.grossProfit >= 0 ? "safe" : "unsafe")}>{calculation.grossProfit >= 0 ? <Check size={15} /> : <AlertTriangle size={15} />}{calculation.grossProfit >= 0 ? "Cost covered" : "Below cost"}</span></div>
             <div className="financial-layout">
               <div className="breakdown-list">
                 <div><span>Base billable amount</span><strong>{currencyFormat(scenario.currency, calculation.baseRevenue)}</strong></div>
                 <div><span>Price modifiers</span><strong>{currencyFormat(scenario.currency, calculation.modifierRevenue)}</strong></div>
                 <div><span>Client-billable expenses</span><strong>{currencyFormat(scenario.currency, calculation.billableExpenses)}</strong></div>
                 <div><span>Manual adjustment</span><strong>{currencyFormat(scenario.currency, scenario.manualAdjustment)}</strong></div>
-                <div className="total"><span>Final rounded quote</span><strong>{currencyFormat(scenario.currency, calculation.quote)}</strong></div>
+                <div className="total"><span>Final quote</span><strong>{currencyFormat(scenario.currency, calculation.quote)}</strong></div>
               </div>
               <div className="margin-visual">
-                <div className="margin-ring" style={{ "--margin": Math.max(0, Math.min(100, calculation.guardedMargin)) + "%" } as React.CSSProperties}><div><strong>{calculation.guardedMargin.toFixed(1)}%</strong><span>guarded margin</span></div></div>
-                <div><span>Minimum safe price</span><strong>{currencyFormat(scenario.currency, calculation.safePrice)}</strong><small>{currencyFormat(scenario.currency, calculation.guardedProfit)} protected profit</small></div>
+                <div className="margin-ring" style={{ "--margin": Math.max(0, Math.min(100, calculation.grossMargin)) + "%" } as React.CSSProperties}><div><strong>{calculation.grossMargin.toFixed(1)}%</strong><span>gross margin</span></div></div>
+                <div><span>Break-even price</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost)}</strong><small>{currencyFormat(scenario.currency, calculation.grossProfit)} gross profit</small></div>
               </div>
               <div className="adjustment-panel">
                 <MoneyInput label="Manual price adjustment" value={scenario.manualAdjustment} onChange={(manualAdjustment) => updateScenario({ manualAdjustment })} suffix={scenario.currency} step={50} />
