@@ -28,7 +28,6 @@ import {
   FileDown,
   GripVertical,
   Info,
-  LockKeyhole,
   Maximize2,
   MessageSquareText,
   Minus,
@@ -39,7 +38,6 @@ import {
   Trash2,
   TrendingUp,
   Upload,
-  UserPlus,
   Users,
   WalletCards,
   X,
@@ -67,20 +65,17 @@ type Person = {
   skills: string;
   notes: string;
   hourlyCost: number;
-  defaultHours: number;
   color: string;
 };
 
 type Assignment = {
   personId: string;
-  hoursPerDay: number;
 };
 
 type Phase = {
   id: string;
   name: string;
   days: number;
-  schedule: "sequential" | "parallel";
   assignments: Assignment[];
 };
 
@@ -108,7 +103,9 @@ type ProjectPlan = {
   currency: Currency;
   startDate: string;
   baseHourlyPrice: number;
+  baseHourlyPriceNotes: string;
   fixedFee: number;
+  fixedFeeNotes: string;
   defaultHours: number;
   workingDays: number[];
   holidays: string[];
@@ -121,7 +118,7 @@ type ProjectPlan = {
 
 type Workspace = {
   app: "voxe-pricing-studio";
-  schemaVersion: 4;
+  schemaVersion: 6;
   people: Person[];
   project: ProjectPlan;
 };
@@ -158,7 +155,6 @@ const makePerson = (person: Partial<Person> & Pick<Person, "name" | "role">): Pe
   skills: person.skills ?? "",
   notes: person.notes ?? "",
   hourlyCost: person.hourlyCost ?? 10,
-  defaultHours: person.defaultHours ?? 6,
   color: person.color ?? COLORS[Math.floor(Math.random() * COLORS.length)],
 });
 
@@ -193,21 +189,22 @@ const initialWorkspace = (): Workspace => {
     type: "Contractor",
     department: "AI Lab",
     hourlyCost: 24,
-    defaultHours: 4,
     skills: "Voice AI, model evaluation, Arabic TTS",
     color: COLORS[3],
   });
 
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 4,
+    schemaVersion: 6,
     people: [designer, developer, qa, aiContractor],
     project: {
         projectName: "Customer Operations Platform",
         currency: "USD",
         startDate: "2026-08-09",
         baseHourlyPrice: 55,
+        baseHourlyPriceNotes: "",
         fixedFee: 1500,
+        fixedFeeNotes: "",
         defaultHours: 6,
         workingDays: [0, 1, 2, 3, 4],
         holidays: [],
@@ -216,40 +213,36 @@ const initialWorkspace = (): Workspace => {
             id: uid(),
             name: "Discovery & architecture",
             days: 5,
-            schedule: "sequential",
             assignments: [
-              { personId: designer.id, hoursPerDay: 4 },
-              { personId: developer.id, hoursPerDay: 3 },
+              { personId: designer.id },
+              { personId: developer.id },
             ],
           },
           {
             id: uid(),
             name: "Product design",
             days: 8,
-            schedule: "sequential",
             assignments: [
-              { personId: designer.id, hoursPerDay: 6 },
-              { personId: developer.id, hoursPerDay: 2 },
+              { personId: designer.id },
+              { personId: developer.id },
             ],
           },
           {
             id: uid(),
             name: "Build & integrations",
             days: 20,
-            schedule: "sequential",
             assignments: [
-              { personId: developer.id, hoursPerDay: 6 },
-              { personId: aiContractor.id, hoursPerDay: 4 },
+              { personId: developer.id },
+              { personId: aiContractor.id },
             ],
           },
           {
             id: uid(),
             name: "QA, UAT & launch",
             days: 7,
-            schedule: "sequential",
             assignments: [
-              { personId: qa.id, hoursPerDay: 6 },
-              { personId: developer.id, hoursPerDay: 2 },
+              { personId: qa.id },
+              { personId: developer.id },
             ],
           },
         ],
@@ -337,6 +330,13 @@ const friendlyDate = (value: string) => {
   );
 };
 
+const longDate = (value: string) => {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en", { month: "long", day: "numeric", year: "numeric" }).format(
+    dateFromString(value),
+  );
+};
+
 const calendarDateFromString = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
@@ -382,38 +382,27 @@ const personTypeClass = (type: PersonType) => type.toLowerCase().replace(" ", "-
 
 function calculateScenario(scenario: ProjectPlan, people: Person[]) {
   const personMap = new Map(people.map((person) => [person.id, person]));
-  const groups: Phase[][] = [];
-  scenario.phases.forEach((phase) => {
-    if (phase.schedule === "parallel" && groups.length) groups[groups.length - 1].push(phase);
-    else groups.push([phase]);
-  });
-
+  const defaultHours = Math.max(0, scenario.defaultHours);
   let workingOffset = 0;
   const rawPhaseData = new Map<string, { rawHours: number; rawCost: number; start: string; end: string }>();
-  groups.forEach((group) => {
-    const groupDuration = Math.max(0, ...group.map((phase) => Math.max(0, Math.round(phase.days))));
-    group.forEach((phase) => {
-      const days = Math.max(0, Math.round(phase.days));
-      const rawHours = phase.assignments.reduce(
-        (sum, assignment) => sum + days * Math.max(0, assignment.hoursPerDay),
-        0,
-      );
-      const rawCost = phase.assignments.reduce((sum, assignment) => {
-        const person = personMap.get(assignment.personId);
-        return sum + days * Math.max(0, assignment.hoursPerDay) * Math.max(0, person?.hourlyCost ?? 0);
-      }, 0);
-      const start = dateKey(workDateAtOffset(scenario.startDate, workingOffset, scenario.workingDays, scenario.holidays));
-      const end = dateKey(
-        workDateAtOffset(
-          scenario.startDate,
-          workingOffset + Math.max(0, days - 1),
-          scenario.workingDays,
-          scenario.holidays,
-        ),
-      );
-      rawPhaseData.set(phase.id, { rawHours, rawCost, start, end });
-    });
-    workingOffset += groupDuration;
+  scenario.phases.forEach((phase) => {
+    const days = Math.max(0, Math.round(phase.days));
+    const rawHours = days * defaultHours * phase.assignments.length;
+    const rawCost = phase.assignments.reduce((sum, assignment) => {
+      const person = personMap.get(assignment.personId);
+      return sum + days * defaultHours * Math.max(0, person?.hourlyCost ?? 0);
+    }, 0);
+    const start = dateKey(workDateAtOffset(scenario.startDate, workingOffset, scenario.workingDays, scenario.holidays));
+    const end = dateKey(
+      workDateAtOffset(
+        scenario.startDate,
+        workingOffset + Math.max(0, days - 1),
+        scenario.workingDays,
+        scenario.holidays,
+      ),
+    );
+    rawPhaseData.set(phase.id, { rawHours, rawCost, start, end });
+    workingOffset += days;
   });
 
   const rawHours = Array.from(rawPhaseData.values()).reduce((sum, phase) => sum + phase.rawHours, 0);
@@ -498,9 +487,7 @@ function calculateScenario(scenario: ProjectPlan, people: Person[]) {
   if (!scenario.workingDays.length) planningWarnings.push("Select at least one working weekday.");
   if (!scenario.phases.length) planningWarnings.push("Add at least one delivery phase.");
   if (scenario.phases.some((phase) => !phase.assignments.length)) planningWarnings.push("One or more phases have no people assigned.");
-  if (scenario.phases.some((phase) => phase.assignments.some((assignment) => assignment.hoursPerDay > 24))) {
-    planningWarnings.push("An assignment exceeds 24 hours per day.");
-  }
+  if (scenario.defaultHours > 24) planningWarnings.push("Default hours per day exceeds 24 hours.");
   if (grossProfit < 0) pricingWarnings.push("The quote is below estimated project cost.");
 
   return {
@@ -552,6 +539,26 @@ const normalizeProjectPlan = (value: unknown): ProjectPlan | null => {
       : 0;
 
   project.baseHourlyPrice = Number.isFinite(baseHourlyPrice) ? baseHourlyPrice : 0;
+  project.baseHourlyPriceNotes = typeof project.baseHourlyPriceNotes === "string"
+    ? project.baseHourlyPriceNotes
+    : "";
+  project.fixedFeeNotes = typeof project.fixedFeeNotes === "string" ? project.fixedFeeNotes : "";
+  project.adjustmentReason = typeof project.adjustmentReason === "string" ? project.adjustmentReason : "";
+  const defaultHours = typeof project.defaultHours === "number" ? project.defaultHours : 6;
+  project.defaultHours = Number.isFinite(defaultHours) ? defaultHours : 6;
+  project.phases = (project.phases as Array<Phase & {
+    schedule?: unknown;
+    assignments?: Array<Assignment & { hoursPerDay?: unknown }>;
+  }>).map((phase) => {
+    const normalizedPhase = {
+      ...phase,
+      assignments: Array.isArray(phase.assignments)
+        ? phase.assignments.map((assignment) => ({ personId: assignment.personId }))
+        : [],
+    };
+    delete normalizedPhase.schedule;
+    return normalizedPhase;
+  });
   project.expenses = (project.expenses as Array<Expense & { notes?: unknown }>).map((expense) => ({
     ...expense,
     notes: typeof expense.notes === "string" ? expense.notes : "",
@@ -594,10 +601,16 @@ const normalizeWorkspace = (value: unknown): Workspace | null => {
   }
   if (!project) return null;
 
+  const people = (candidate.people as Array<Person & { defaultHours?: unknown }>).map((person) => {
+    const normalizedPerson = { ...person };
+    delete normalizedPerson.defaultHours;
+    return normalizedPerson;
+  });
+
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 4,
-    people: candidate.people as Person[],
+    schemaVersion: 6,
+    people,
     project,
   };
 };
@@ -1573,7 +1586,6 @@ export default function Home() {
   const [planningMode, setPlanningMode] = useState(true);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isNewPerson, setIsNewPerson] = useState(false);
-  const [phasePickerId, setPhasePickerId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
   const [maximizedProjectPanel, setMaximizedProjectPanel] = useState<ProjectSettingsPanel | null>(null);
   const [maximizedDeliveryPanel, setMaximizedDeliveryPanel] = useState<DeliveryPanel | null>(null);
@@ -1590,13 +1602,70 @@ export default function Home() {
     [scenario, workspace.people],
   );
   const assignedPeopleCount = useMemo(
-    () => new Set(scenario.phases.flatMap((phase) => phase.assignments.map((assignment) => assignment.personId))).size,
-    [scenario.phases],
+    () => {
+      const availablePeople = new Set(workspace.people.map((person) => person.id));
+      return new Set(
+        scenario.phases.flatMap((phase) => (
+          phase.assignments
+            .map((assignment) => assignment.personId)
+            .filter((personId) => availablePeople.has(personId))
+        )),
+      ).size;
+    },
+    [scenario.phases, workspace.people],
   );
   const visibleWarnings = planningMode ? calculation.planningWarnings : calculation.warnings;
   const visibleModifiers = planningMode
     ? scenario.modifiers.filter((modifier) => modifier.target === "effort")
     : scenario.modifiers;
+  const quoteBeforeFloor = calculation.baseRevenue
+    + calculation.modifierRevenue
+    + calculation.billableExpenses
+    + scenario.manualAdjustment;
+  const quoteFloorAdjustment = calculation.quote - quoteBeforeFloor;
+  const grossMarginValue = calculation.quote > 0 ? calculation.grossMargin : null;
+  const costCoverage = calculation.estimatedCost > 0
+    ? (calculation.quote / calculation.estimatedCost) * 100
+    : null;
+  const markupOnCost = calculation.estimatedCost > 0
+    ? (calculation.grossProfit / calculation.estimatedCost) * 100
+    : null;
+  const serviceRevenuePerHour = calculation.totalHours > 0
+    ? (calculation.quote - calculation.billableExpenses) / calculation.totalHours
+    : null;
+  const laborCostPerHour = calculation.totalHours > 0
+    ? calculation.laborCost / calculation.totalHours
+    : null;
+  const effortDeltaHours = calculation.totalHours - calculation.rawHours;
+  const effortDeltaPercent = calculation.rawHours > 0
+    ? (effortDeltaHours / calculation.rawHours) * 100
+    : null;
+  const laborCostShare = calculation.estimatedCost > 0
+    ? (calculation.laborCost / calculation.estimatedCost) * 100
+    : 0;
+  const expenseCostShare = calculation.estimatedCost > 0
+    ? (calculation.expenseCost / calculation.estimatedCost) * 100
+    : 0;
+  const quoteBreakdown = [
+    { label: "Base billable amount", detail: "Delivery hours and fixed project fee", value: calculation.baseRevenue },
+    { label: "Price modifiers", detail: "Commercial complexity and price adjustments", value: calculation.modifierRevenue },
+    { label: "Client-billable expenses", detail: "Pass-through and marked-up project expenses", value: calculation.billableExpenses },
+    { label: "Manual adjustment", detail: scenario.adjustmentReason.trim() || "No adjustment reason recorded", value: scenario.manualAdjustment },
+    ...(Math.abs(quoteFloorAdjustment) > 0.005
+      ? [{ label: "Zero-price floor", detail: "Prevents the final quote from becoming negative", value: quoteFloorAdjustment }]
+      : []),
+  ];
+  const targetMarginQuotes = [20, 30, 40].map((margin) => ({
+    margin,
+    quote: calculation.estimatedCost > 0
+      ? calculation.estimatedCost / (1 - margin / 100)
+      : null,
+  }));
+  const decisionStatus = calculation.estimatedCost <= 0
+    ? { tone: "neutral", label: calculation.quote > 0 ? "Costs not modeled" : "Estimate incomplete" }
+    : calculation.grossProfit >= 0
+      ? { tone: "safe", label: "Cost covered" }
+      : { tone: "unsafe", label: "Below cost" };
   const showCommercialPanel = maximizedProjectPanel === null || maximizedProjectPanel === "commercial";
   const showSchedulePanel = maximizedProjectPanel === null || maximizedProjectPanel === "schedule";
   const showModifiersPanel = maximizedProjectPanel === null || maximizedProjectPanel === "modifiers";
@@ -1607,7 +1676,8 @@ export default function Home() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       try {
-        setPlanningMode(localStorage.getItem(PLANNING_MODE_KEY) === "true");
+        const savedPlanningMode = localStorage.getItem(PLANNING_MODE_KEY);
+        setPlanningMode(savedPlanningMode === null ? true : savedPlanningMode === "true");
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved) as unknown;
@@ -1664,7 +1734,7 @@ export default function Home() {
     updateScenario({
       phases: [
         ...scenario.phases,
-        { id: uid(), name: "New phase", days: 5, schedule: "sequential", assignments: [] },
+        { id: uid(), name: "New phase", days: 5, assignments: [] },
       ],
     });
   };
@@ -1678,9 +1748,8 @@ export default function Home() {
     const phase = scenario.phases.find((item) => item.id === phaseId);
     if (!person || !phase || phase.assignments.some((assignment) => assignment.personId === personId)) return;
     updatePhase(phaseId, {
-      assignments: [...phase.assignments, { personId, hoursPerDay: person.defaultHours || scenario.defaultHours }],
+      assignments: [...phase.assignments, { personId }],
     });
-    setPhasePickerId(null);
   };
 
   const unassignPerson = (phaseId: string, personId: string) => {
@@ -1688,16 +1757,6 @@ export default function Home() {
     if (!phase) return;
     updatePhase(phaseId, {
       assignments: phase.assignments.filter((assignment) => assignment.personId !== personId),
-    });
-  };
-
-  const updateAssignmentHours = (phaseId: string, personId: string, hoursPerDay: number) => {
-    const phase = scenario.phases.find((item) => item.id === phaseId);
-    if (!phase) return;
-    updatePhase(phaseId, {
-      assignments: phase.assignments.map((assignment) =>
-        assignment.personId === personId ? { ...assignment, hoursPerDay } : assignment,
-      ),
     });
   };
 
@@ -1716,7 +1775,6 @@ export default function Home() {
         type: "Employee",
         department: "Delivery",
         hourlyCost: 0,
-        defaultHours: scenario.defaultHours,
       }),
     );
     setIsNewPerson(true);
@@ -1858,7 +1916,7 @@ export default function Home() {
   const expenseResult = (expenseId: string) => calculation.expenseResults.find((item) => item.id === expenseId);
 
   return (
-    <main className={"app-shell " + (planningMode ? "planning-mode" : "pricing-mode")}>
+    <main className={`app-shell ${planningMode ? "planning-mode" : "pricing-mode"}`}>
       <div className="animated-backdrop" aria-hidden="true">
         <div className="backdrop-grid" />
         <LiveBackground />
@@ -1892,6 +1950,7 @@ export default function Home() {
               role="switch"
               aria-checked={planningMode}
               aria-label={planningMode ? "Turn off planning mode and show pricing" : "Turn on planning mode and hide pricing"}
+              title={planningMode ? "Show pricing" : "Hide pricing"}
               onClick={togglePlanningMode}
             >
               <span className="privacy-switch-icon">{planningMode ? <EyeOff size={15} /> : <Eye size={15} />}</span>
@@ -1909,11 +1968,11 @@ export default function Home() {
           </div>
           <span className="nav-divider" aria-hidden="true" />
           <div className="file-actions">
-            <button type="button" className="button secondary topbar-import" onClick={() => fileInput.current?.click()}>
-              <Upload size={16} /> Import
+            <button type="button" className="button secondary topbar-import" aria-label="Import project" title="Import project" onClick={() => fileInput.current?.click()}>
+              <Upload size={16} /><span>Import</span>
             </button>
-            <button type="button" className="button primary topbar-export" onClick={() => setExportOpen(true)}>
-              <ArrowDownToLine size={16} /> Export
+            <button type="button" className="button primary topbar-export" aria-label="Export project" title="Export project" onClick={() => setExportOpen(true)}>
+              <ArrowDownToLine size={16} /><span>Export</span>
             </button>
           </div>
           <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={handleImport} />
@@ -1974,7 +2033,7 @@ export default function Home() {
         </section>
       ) : (
         <>
-          <section className={"metric-grid " + (planningMode ? "planning-metrics" : "pricing-metrics")}>
+          <section className={`metric-grid ${planningMode ? "planning-metrics" : "pricing-metrics"}`}>
             {planningMode ? (
               <>
                 <article className="metric-card glass-panel featured">
@@ -2058,8 +2117,93 @@ export default function Home() {
                         onChange={(currency) => updateScenario({ currency: currency as Currency })}
                       />
                     </label>
-                    <MoneyInput label="Base price / hour" value={scenario.baseHourlyPrice} onChange={(baseHourlyPrice) => updateScenario({ baseHourlyPrice })} suffix={scenario.currency + "/h"} min={0} />
-                    <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} step={50} />
+                    <div className="commercial-adjustment-control">
+                      <MoneyInput label="Base price / hour" value={scenario.baseHourlyPrice} onChange={(baseHourlyPrice) => updateScenario({ baseHourlyPrice })} suffix={scenario.currency + "/h"} min={0} />
+                      <button
+                        type="button"
+                        className={`icon-button note-button${scenario.baseHourlyPriceNotes.trim() ? " has-notes" : ""}`}
+                        aria-label={`${scenario.baseHourlyPriceNotes.trim() ? "Edit" : "Add"} AI notes for base price per hour`}
+                        aria-expanded={openNotesKey === "commercial:base-price"}
+                        aria-controls="commercial-base-price-notes"
+                        title="Notes for AI"
+                        onClick={() => setOpenNotesKey((current) => current === "commercial:base-price" ? null : "commercial:base-price")}
+                      >
+                        <MessageSquareText size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                    {openNotesKey === "commercial:base-price" && (
+                      <div className="row-notes-editor commercial-adjustment-notes" id="commercial-base-price-notes">
+                        <label htmlFor="commercial-base-price-notes-input"><Sparkles size={14} /> Notes for future AI</label>
+                        <textarea
+                          id="commercial-base-price-notes-input"
+                          autoFocus
+                          rows={3}
+                          placeholder="Explain how the base hourly price was chosen and which assumptions or approvals support it."
+                          value={scenario.baseHourlyPriceNotes}
+                          aria-describedby="commercial-base-price-notes-help"
+                          onChange={(event) => updateScenario({ baseHourlyPriceNotes: event.target.value })}
+                        />
+                        <small id="commercial-base-price-notes-help">Saved with this project so future AI analysis can understand the pricing reasoning.</small>
+                      </div>
+                    )}
+                    <div className="commercial-adjustment-control">
+                      <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} suffix={scenario.currency} min={0} step={50} />
+                      <button
+                        type="button"
+                        className={`icon-button note-button${scenario.fixedFeeNotes.trim() ? " has-notes" : ""}`}
+                        aria-label={`${scenario.fixedFeeNotes.trim() ? "Edit" : "Add"} AI notes for fixed starting fee`}
+                        aria-expanded={openNotesKey === "commercial:fixed-fee"}
+                        aria-controls="commercial-fixed-fee-notes"
+                        title="Notes for AI"
+                        onClick={() => setOpenNotesKey((current) => current === "commercial:fixed-fee" ? null : "commercial:fixed-fee")}
+                      >
+                        <MessageSquareText size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                    {openNotesKey === "commercial:fixed-fee" && (
+                      <div className="row-notes-editor commercial-adjustment-notes" id="commercial-fixed-fee-notes">
+                        <label htmlFor="commercial-fixed-fee-notes-input"><Sparkles size={14} /> Notes for future AI</label>
+                        <textarea
+                          id="commercial-fixed-fee-notes-input"
+                          autoFocus
+                          rows={3}
+                          placeholder="Explain what the fixed starting fee covers and why this amount was selected."
+                          value={scenario.fixedFeeNotes}
+                          aria-describedby="commercial-fixed-fee-notes-help"
+                          onChange={(event) => updateScenario({ fixedFeeNotes: event.target.value })}
+                        />
+                        <small id="commercial-fixed-fee-notes-help">Saved with this project so future AI analysis can understand the fee reasoning.</small>
+                      </div>
+                    )}
+                    <div className="commercial-adjustment-control">
+                      <MoneyInput label="Manual price adjustment" value={scenario.manualAdjustment} onChange={(manualAdjustment) => updateScenario({ manualAdjustment })} suffix={scenario.currency} step={50} />
+                      <button
+                        type="button"
+                        className={`icon-button note-button${scenario.adjustmentReason.trim() ? " has-notes" : ""}`}
+                        aria-label={`${scenario.adjustmentReason.trim() ? "Edit" : "Add"} AI notes for commercial adjustment`}
+                        aria-expanded={openNotesKey === "commercial:adjustment"}
+                        aria-controls="commercial-adjustment-notes"
+                        title="Notes for AI"
+                        onClick={() => setOpenNotesKey((current) => current === "commercial:adjustment" ? null : "commercial:adjustment")}
+                      >
+                        <MessageSquareText size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                    {openNotesKey === "commercial:adjustment" && (
+                      <div className="row-notes-editor commercial-adjustment-notes" id="commercial-adjustment-notes">
+                        <label htmlFor="commercial-adjustment-notes-input"><Sparkles size={14} /> Notes for future AI</label>
+                        <textarea
+                          id="commercial-adjustment-notes-input"
+                          autoFocus
+                          rows={3}
+                          placeholder="Explain why this adjustment is needed, who approved it, and which commercial assumption it represents."
+                          value={scenario.adjustmentReason}
+                          aria-describedby="commercial-adjustment-notes-help"
+                          onChange={(event) => updateScenario({ adjustmentReason: event.target.value })}
+                        />
+                        <small id="commercial-adjustment-notes-help">Saved with this project so future AI analysis can understand the commercial reasoning.</small>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -2268,14 +2412,14 @@ export default function Home() {
 
           <section className={"phases-card glass-panel" + (maximizedDeliveryPanel ? " has-maximized-panel" : "")}>
             <div className="section-heading">
-              <div className="section-title-block"><p className="eyebrow section-kicker">Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
-              {showPhasesPanel && <button type="button" className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>}
+              <div className="section-title-block"><h2>Phases & staffing</h2></div>
             </div>
             <div className={"delivery-workspace" + (maximizedDeliveryPanel ? " is-single" : "")}>
               {showPeoplePanel && (
               <aside className="people-sidebar" aria-label="People sidebar">
-                <div className="dock-heading">
-                  <div><p className="eyebrow">Talent pool</p><h3>People</h3></div>
+                <div className="settings-column-heading people-workspace-heading">
+                  <span className="settings-column-icon people" aria-hidden="true"><Users size={18} /></span>
+                  <div><h3>People</h3></div>
                   <span className="panel-heading-actions">
                     <button type="button" className="icon-button accent" onClick={openNewPerson} aria-label="Add person"><Plus size={17} /></button>
                     <PanelSizeButton label="People" maximized={maximizedDeliveryPanel === "people"} onToggle={() => runPanelViewTransition(() => { setMaximizedDeliveryPanel((current) => current === "people" ? null : "people"); setDragOverPhase(null); })} />
@@ -2302,7 +2446,6 @@ export default function Home() {
                       <GripVertical size={17} />
                     </button>
                   ))}
-                  <button type="button" className="add-person-card" onClick={openNewPerson}><UserPlus size={18} /><span>Add someone</span></button>
                 </div>
                 <div className="dock-footer"><Users size={17} /><span>{workspace.people.length} people available</span></div>
               </aside>
@@ -2312,12 +2455,15 @@ export default function Home() {
               <section className="phase-workspace" aria-labelledby="phases-panel-title">
                 <div className="settings-column-heading phase-workspace-heading">
                   <span className="settings-column-icon schedule" aria-hidden="true"><BriefcaseBusiness size={18} /></span>
-                  <div><h3 id="phases-panel-title">Phases</h3><small>Schedule, staffing and delivery effort</small></div>
-                  <PanelSizeButton label="Phases" maximized={maximizedDeliveryPanel === "phases"} onToggle={() => runPanelViewTransition(() => { setMaximizedDeliveryPanel((current) => current === "phases" ? null : "phases"); setDragOverPhase(null); })} />
+                  <div><h3 id="phases-panel-title">Phases</h3><small>Workdays, staffing and delivery effort</small></div>
+                  <span className="panel-heading-actions">
+                    <button type="button" className="icon-button accent" aria-label="Add phase" title="Add phase" onClick={addPhase}><Plus size={17} /></button>
+                    <PanelSizeButton label="Phases" maximized={maximizedDeliveryPanel === "phases"} onToggle={() => runPanelViewTransition(() => { setMaximizedDeliveryPanel((current) => current === "phases" ? null : "phases"); setDragOverPhase(null); })} />
+                  </span>
                 </div>
                 <div className={"phase-table " + (planningMode ? "planning-phase-table" : "")}>
               <div className="phase-table-head">
-                <span>Phase</span><span>Schedule</span><span>Workdays</span><span>Assigned people</span><span>Hours</span>{!planningMode && <span>Cost</span>}<span />
+                <span>Phase</span><span>Workdays</span><span>Assigned people</span><span className="phase-number-heading">Hours</span>{!planningMode && <span className="phase-number-heading">Cost</span>}<span className="phase-action-heading">Actions</span>
               </div>
               {scenario.phases.map((phase, index) => {
                 const result = phaseResult(phase.id);
@@ -2329,76 +2475,157 @@ export default function Home() {
                     onDragLeave={() => setDragOverPhase(null)}
                     onDrop={(event) => handleDrop(event, phase.id)}
                   >
-                    <div className="phase-name-cell"><GripVertical size={16} /><b>{String(index + 1).padStart(2, "0")}</b><input value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></div>
-                    <GlassSelect
-                      ariaLabel={phase.name + " schedule"}
-                      value={phase.schedule}
-                      options={[
-                        { value: "sequential", label: "After previous" },
-                        { value: "parallel", label: "Alongside previous", disabled: index === 0 },
-                      ]}
-                      onChange={(schedule) => updatePhase(phase.id, { schedule: schedule as Phase["schedule"] })}
-                    />
-                    <NumberStepper compact ariaLabel={phase.name + " workdays"} value={phase.days} min={0} step={1} suffix="days" onChange={(days) => updatePhase(phase.id, { days })} />
-                    <div className="assignment-zone">
+                    <div className="phase-name-block">
+                      <div className="phase-name-cell">
+                        <b aria-hidden="true">{String(index + 1).padStart(2, "0")}</b>
+                        <input aria-label={`Phase ${index + 1} name`} value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} />
+                      </div>
+                      <div className="phase-date" title={`${longDate(result?.start ?? "")} to ${longDate(result?.end ?? "")}`}>
+                        <CalendarDays size={13} aria-hidden="true" />
+                        <span className="phase-date-context">Phase dates: </span>
+                        <time dateTime={result?.start || undefined}>{longDate(result?.start ?? "")}</time>
+                        <span aria-hidden="true">→</span><span className="phase-date-context"> to </span>
+                        <time dateTime={result?.end || undefined}>{longDate(result?.end ?? "")}</time>
+                      </div>
+                    </div>
+                    <NumberStepper ariaLabel={phase.name + " workdays"} value={phase.days} min={0} step={1} suffix="days" onChange={(days) => updatePhase(phase.id, { days })} />
+                    <div className="assignment-zone" role="group" aria-label={`Assigned people for ${phase.name}. Drag people here.`}>
                       {phase.assignments.map((assignment) => {
                         const person = workspace.people.find((item) => item.id === assignment.personId);
                         if (!person) return null;
                         return (
                           <div className="assignment-pill" key={person.id} title={person.name + " • " + person.role}>
-                            <i style={{ background: person.color }}>{initials(person.name)}</i>
-                            <NumberStepper
-                              compact
-                              ariaLabel={person.name + " hours per day"}
-                              value={assignment.hoursPerDay}
-                              min={0}
-                              max={24}
-                              step={0.5}
-                              suffix="h/d"
-                              onChange={(hoursPerDay) => updateAssignmentHours(phase.id, person.id, hoursPerDay)}
-                            />
-                            <button onClick={() => unassignPerson(phase.id, person.id)} aria-label={"Remove " + person.name}><X size={12} /></button>
+                            <i aria-hidden="true" style={{ background: person.color }}>{initials(person.name)}</i>
+                            <span className="assignment-person-name">{person.name}</span>
+                            <button type="button" title={`Remove ${person.name}`} onClick={() => unassignPerson(phase.id, person.id)} aria-label={"Remove " + person.name}><X size={12} /></button>
                           </div>
                         );
                       })}
-                      <button className="add-person-button" onClick={() => setPhasePickerId(phase.id)}><UserPlus size={15} /> Add</button>
-                      {!phase.assignments.length && <small>Drop a person here</small>}
+                      {!phase.assignments.length && <small>Drag people here</small>}
                     </div>
-                    <strong>{Math.round(result?.adjustedHours ?? 0)}h</strong>
-                    {!planningMode && <strong>{currencyFormat(scenario.currency, result?.laborCost ?? 0)}</strong>}
-                    <button className="icon-button danger" onClick={() => removePhase(phase.id)} aria-label={"Remove " + phase.name}><Trash2 size={15} /></button>
-                    <div className="phase-date"><CalendarDays size={13} /> {friendlyDate(result?.start ?? "")} → {friendlyDate(result?.end ?? "")}</div>
+                    <strong className="phase-number phase-hours-value">{Math.round(result?.adjustedHours ?? 0)}h</strong>
+                    {!planningMode && <strong className="phase-number phase-cost-value">{currencyFormat(scenario.currency, result?.laborCost ?? 0)}</strong>}
+                    <button type="button" className="icon-button danger phase-action-button" title={`Remove ${phase.name}`} onClick={() => removePhase(phase.id)} aria-label={"Remove " + phase.name}><Trash2 size={16} /></button>
                   </div>
                 );
               })}
               {!scenario.phases.length && <div className="empty-state"><CalendarDays size={24} /><strong>No delivery phases yet</strong><span>Add the first phase to begin the estimate.</span></div>}
+                </div>
+                <div className={`phase-totals-summary ${planningMode ? "planning-phase-totals" : "pricing-phase-totals"}`} aria-label="Phase totals">
+                  <article className="phase-total-item phase-total-duration">
+                    <span className="phase-total-label">Project duration</span>
+                    <strong className="phase-total-value">{calculation.totalWorkingDays} workdays</strong>
+                    <small className="phase-total-detail">{calculation.calendarDays} calendar days</small>
+                  </article>
+                  <article className="phase-total-item phase-total-hours">
+                    <span className="phase-total-label">Total hours</span>
+                    <strong className="phase-total-value">{Math.round(calculation.totalHours)}h</strong>
+                    <small className="phase-total-detail">Scheduled delivery effort</small>
+                  </article>
+                  <article className="phase-total-item phase-total-phases">
+                    <span className="phase-total-label">Phases</span>
+                    <strong className="phase-total-value">{scenario.phases.length}</strong>
+                    <small className="phase-total-detail">{scenario.phases.length === 1 ? "Delivery phase" : "Delivery phases"}</small>
+                  </article>
+                  <article className="phase-total-item phase-total-people">
+                    <span className="phase-total-label">Assigned people</span>
+                    <strong className="phase-total-value">{assignedPeopleCount}</strong>
+                    <small className="phase-total-detail">Unique team members</small>
+                  </article>
+                  {!planningMode && (
+                    <>
+                      <article className="phase-total-item phase-total-labor">
+                        <span className="phase-total-label">Labor cost</span>
+                        <strong className="phase-total-value">{currencyFormat(scenario.currency, calculation.laborCost)}</strong>
+                        <small className="phase-total-detail">Calculated staffing cost</small>
+                      </article>
+                      <article className="phase-total-item phase-total-price">
+                        <span className="phase-total-label">Total project price</span>
+                        <strong className="phase-total-value">{currencyFormat(scenario.currency, calculation.quote)}</strong>
+                        <small className="phase-total-detail">Final quote including commercial adjustments</small>
+                      </article>
+                    </>
+                  )}
                 </div>
               </section>
               )}
             </div>
           </section>
 
-          {!planningMode && <section className="financial-card glass-panel">
-            <div className="section-heading"><div className="section-title-block"><p className="eyebrow section-kicker">Decision</p><h2>Financial pulse</h2><p>Compare the final quote with estimated delivery cost and actual gross profit.</p></div><span className={"safety-badge " + (calculation.grossProfit >= 0 ? "safe" : "unsafe")}>{calculation.grossProfit >= 0 ? <Check size={15} /> : <AlertTriangle size={15} />}{calculation.grossProfit >= 0 ? "Cost covered" : "Below cost"}</span></div>
-            <div className="financial-layout">
-              <div className="breakdown-list">
-                <div><span>Base billable amount</span><strong>{currencyFormat(scenario.currency, calculation.baseRevenue)}</strong></div>
-                <div><span>Price modifiers</span><strong>{currencyFormat(scenario.currency, calculation.modifierRevenue)}</strong></div>
-                <div><span>Client-billable expenses</span><strong>{currencyFormat(scenario.currency, calculation.billableExpenses)}</strong></div>
-                <div><span>Manual adjustment</span><strong>{currencyFormat(scenario.currency, scenario.manualAdjustment)}</strong></div>
-                <div className="total"><span>Final quote</span><strong>{currencyFormat(scenario.currency, calculation.quote)}</strong></div>
+          {!planningMode && (
+            <section className="decision-card glass-panel" aria-labelledby="decision-analytics-title">
+              <div className="section-heading">
+                <div className="section-title-block"><h2 id="decision-analytics-title">Decision analytics</h2></div>
               </div>
-              <div className="margin-visual">
-                <div className="margin-ring" style={{ "--margin": Math.max(0, Math.min(100, calculation.grossMargin)) + "%" } as React.CSSProperties}><div><strong>{calculation.grossMargin.toFixed(1)}%</strong><span>gross margin</span></div></div>
-                <div><span>Break-even price</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost)}</strong><small>{currencyFormat(scenario.currency, calculation.grossProfit)} gross profit</small></div>
+
+              <div className="decision-kpi-grid" aria-label="Decision analytics summary">
+                <article className="decision-kpi">
+                  <span className="decision-kpi-icon green" aria-hidden="true"><TrendingUp size={19} /></span>
+                  <div><span>Gross margin</span><strong className={calculation.grossProfit < 0 ? "negative" : "positive"}>{grossMarginValue === null ? "—" : `${grossMarginValue.toFixed(1)}%`}</strong><small>{currencyFormat(scenario.currency, calculation.grossProfit)} gross profit</small></div>
+                </article>
+                <article className="decision-kpi">
+                  <span className="decision-kpi-icon violet" aria-hidden="true"><WalletCards size={19} /></span>
+                  <div><span>Cost coverage</span><strong>{costCoverage === null ? "—" : `${costCoverage.toFixed(1)}%`}</strong><small>{markupOnCost === null ? "Add modeled costs" : `${markupOnCost.toFixed(1)}% markup on cost`}</small></div>
+                </article>
+                <article className="decision-kpi">
+                  <span className="decision-kpi-icon" aria-hidden="true"><CircleDollarSign size={19} /></span>
+                  <div><span>Service revenue / hour</span><strong>{serviceRevenuePerHour === null ? "—" : currencyFormat(scenario.currency, serviceRevenuePerHour)}</strong><small>{laborCostPerHour === null ? "Add delivery effort" : `${currencyFormat(scenario.currency, laborCostPerHour)} labor cost / hour`}</small></div>
+                </article>
+                <article className="decision-kpi">
+                  <span className="decision-kpi-icon orange" aria-hidden="true"><Clock3 size={19} /></span>
+                  <div><span>Effort impact</span><strong>{effortDeltaPercent === null ? "—" : `${effortDeltaPercent >= 0 ? "+" : ""}${effortDeltaPercent.toFixed(1)}%`}</strong><small>{`${effortDeltaHours >= 0 ? "+" : ""}${Math.round(effortDeltaHours)}h from effort modifiers`}</small></div>
+                </article>
               </div>
-              <div className="adjustment-panel">
-                <MoneyInput label="Manual price adjustment" value={scenario.manualAdjustment} onChange={(manualAdjustment) => updateScenario({ manualAdjustment })} suffix={scenario.currency} step={50} />
-                <label className="field"><span>Reason</span><input placeholder="Required for internal traceability" value={scenario.adjustmentReason} onChange={(event) => updateScenario({ adjustmentReason: event.target.value })} /></label>
-                <div className="formula-note"><LockKeyhole size={15} /><span>Internal costs never appear in Client view or its printout.</span></div>
+
+              <div className="decision-layout">
+                <section className="settings-column decision-panel" aria-labelledby="quote-reconciliation-title">
+                  <div className="settings-column-heading">
+                    <span className="settings-column-icon commercial" aria-hidden="true"><CircleDollarSign size={18} /></span>
+                    <div><h3 id="quote-reconciliation-title">Quote reconciliation</h3><small>Every component of the final client quote</small></div>
+                  </div>
+                  <dl className="decision-breakdown">
+                    {quoteBreakdown.map((item) => (
+                      <div key={item.label}>
+                        <dt><span>{item.label}</span><small>{item.detail}</small></dt>
+                        <dd className={item.value < 0 ? "negative" : ""}><data value={item.value}>{currencyFormat(scenario.currency, item.value)}</data></dd>
+                      </div>
+                    ))}
+                    <div className="total"><dt>Final quote</dt><dd><data value={calculation.quote}>{currencyFormat(scenario.currency, calculation.quote)}</data></dd></div>
+                  </dl>
+                </section>
+
+                <section className="settings-column decision-panel" aria-labelledby="cost-guide-title">
+                  <div className="settings-column-heading">
+                    <span className="settings-column-icon schedule" aria-hidden="true"><TrendingUp size={18} /></span>
+                    <div><h3 id="cost-guide-title">Cost &amp; pricing guide</h3><small>Cost mix, break-even and margin targets</small></div>
+                    <output className={`decision-status ${decisionStatus.tone}`} aria-live="polite" aria-atomic="true">{decisionStatus.tone === "safe" ? <Check size={14} aria-hidden="true" /> : decisionStatus.tone === "unsafe" ? <AlertTriangle size={14} aria-hidden="true" /> : <Info size={14} aria-hidden="true" />}{decisionStatus.label}</output>
+                  </div>
+                  <div className="cost-mix">
+                    <div className="cost-mix-bar" aria-hidden="true">
+                      <span className="labor" style={{ width: `${laborCostShare}%` }} />
+                      <span className="expenses" style={{ width: `${expenseCostShare}%` }} />
+                    </div>
+                    <dl className="cost-mix-legend">
+                      <div><dt><i className="labor" />Labor cost <small>{laborCostShare.toFixed(1)}%</small></dt><dd>{currencyFormat(scenario.currency, calculation.laborCost)}</dd></div>
+                      <div><dt><i className="expenses" />Expense cost <small>{expenseCostShare.toFixed(1)}%</small></dt><dd>{currencyFormat(scenario.currency, calculation.expenseCost)}</dd></div>
+                    </dl>
+                  </div>
+                  <dl className="decision-facts">
+                    <div><dt>Cost floor</dt><dd>{currencyFormat(scenario.currency, calculation.estimatedCost)}</dd></div>
+                    <div><dt>{calculation.grossProfit >= 0 ? "Profit headroom" : "Quote shortfall"}</dt><dd className={calculation.grossProfit < 0 ? "negative" : "positive"}>{currencyFormat(scenario.currency, Math.abs(calculation.grossProfit))}</dd></div>
+                  </dl>
+                  <div className="target-guide">
+                    <div className="target-guide-heading"><strong>Target-margin quote</strong><small>Minimum quote required for each gross margin</small></div>
+                    <div className="target-guide-grid">
+                      {targetMarginQuotes.map((target) => (
+                        <div key={target.margin}><span>{target.margin}% margin</span><strong>{target.quote === null ? "—" : currencyFormat(scenario.currency, target.quote)}</strong></div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
               </div>
-            </div>
-          </section>}
+            </section>
+          )}
         </>
       )}
 
@@ -2418,7 +2645,6 @@ export default function Home() {
               <label className="field"><span>Role *</span><input required value={editingPerson.role} onChange={(event) => setEditingPerson({ ...editingPerson, role: event.target.value })} /></label>
               <label className="field"><span>Department</span><input value={editingPerson.department} onChange={(event) => setEditingPerson({ ...editingPerson, department: event.target.value })} /></label>
               {!planningMode && <MoneyInput label="Internal hourly cost" value={editingPerson.hourlyCost} onChange={(hourlyCost) => setEditingPerson({ ...editingPerson, hourlyCost })} suffix={scenario.currency + "/h"} min={0} />}
-              <MoneyInput label="Default hours / day" value={editingPerson.defaultHours} onChange={(defaultHours) => setEditingPerson({ ...editingPerson, defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
               <label className="field"><span>Email</span><input type="email" value={editingPerson.email} onChange={(event) => setEditingPerson({ ...editingPerson, email: event.target.value })} /></label>
               <label className="field"><span>Phone</span><input value={editingPerson.phone} onChange={(event) => setEditingPerson({ ...editingPerson, phone: event.target.value })} /></label>
               <label className="field"><span>Location</span><input value={editingPerson.location} onChange={(event) => setEditingPerson({ ...editingPerson, location: event.target.value })} /></label>
@@ -2432,25 +2658,6 @@ export default function Home() {
               <button type="submit" className="button primary"><Check size={16} /> {isNewPerson ? "Add to people" : "Save profile"}</button>
             </div>
           </form>
-        </Modal>
-      )}
-
-      {phasePickerId && (
-        <Modal title="Assign someone" subtitle="Choose anyone from your shared talent pool." onClose={() => setPhasePickerId(null)}>
-          <div className="person-picker">
-            {workspace.people.map((person) => {
-              const phase = scenario.phases.find((item) => item.id === phasePickerId);
-              const assigned = phase?.assignments.some((assignment) => assignment.personId === person.id);
-              return (
-                <button key={person.id} disabled={assigned} onClick={() => assignPerson(phasePickerId, person.id)}>
-                  <i style={{ background: person.color }}>{initials(person.name)}</i>
-                  <div><strong>{person.name}</strong><span>{person.role} • {person.type}</span></div>
-                  {assigned ? <Check size={16} /> : <Plus size={16} />}
-                </button>
-              );
-            })}
-            <button className="new-person-picker" onClick={() => { setPhasePickerId(null); openNewPerson(); }}><UserPlus size={17} /> Add a new employee, intern or contractor</button>
-          </div>
         </Modal>
       )}
 
