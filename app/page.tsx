@@ -19,18 +19,19 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Clock3,
-  Copy,
+  Eye,
+  EyeOff,
   FileDown,
   GripVertical,
-  HardDrive,
   Info,
   LockKeyhole,
   Minus,
   Plus,
   Printer,
-  ShieldCheck,
   Sparkles,
   Trash2,
   TrendingUp,
@@ -40,10 +41,6 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { gcm } from "@noble/ciphers/aes";
-import { bytesToUtf8, utf8ToBytes } from "@noble/ciphers/utils";
-import { pbkdf2 } from "@noble/hashes/pbkdf2";
-import { sha256 } from "@noble/hashes/sha2";
 
 type Currency = "USD" | "IQD" | "EUR" | "GBP";
 type PersonType = "Employee" | "Intern" | "Contractor" | "Freelancer" | "Advisor";
@@ -99,9 +96,7 @@ type Modifier = {
   value: number;
 };
 
-type Scenario = {
-  id: string;
-  name: string;
+type ProjectPlan = {
   projectName: string;
   currency: Currency;
   startDate: string;
@@ -122,10 +117,9 @@ type Scenario = {
 
 type Workspace = {
   app: "voxe-pricing-studio";
-  schemaVersion: 1;
-  activeScenarioId: string;
+  schemaVersion: 2;
   people: Person[];
-  scenarios: Scenario[];
+  project: ProjectPlan;
 };
 
 type PhaseResult = {
@@ -139,6 +133,7 @@ type PhaseResult = {
 };
 
 const STORAGE_KEY = "voxe-pricing-studio-v1";
+const PLANNING_MODE_KEY = "voxe-pricing-planning-mode-v1";
 const COLORS = ["#7c5cff", "#eb6cff", "#33c7b7", "#ff985c", "#5d91ff", "#d9b84f"];
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -199,16 +194,11 @@ const initialWorkspace = (): Workspace => {
     color: COLORS[3],
   });
 
-  const scenarioId = uid();
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 1,
-    activeScenarioId: scenarioId,
+    schemaVersion: 2,
     people: [designer, developer, qa, aiContractor],
-    scenarios: [
-      {
-        id: scenarioId,
-        name: "Standard",
+    project: {
         projectName: "Customer Operations Platform",
         currency: "USD",
         startDate: "2026-08-09",
@@ -287,7 +277,6 @@ const initialWorkspace = (): Workspace => {
         manualAdjustment: 0,
         adjustmentReason: "",
       },
-    ],
   };
 };
 
@@ -352,6 +341,19 @@ const friendlyDate = (value: string) => {
   );
 };
 
+const calendarDateFromString = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, month, day, 12);
+  return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day ? date : null;
+};
+
+const calendarMonthFormat = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+const calendarDateFormat = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
 const currencyFormat = (currency: Currency, value: number, compact = false) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -382,7 +384,7 @@ type GlassOption = {
 
 const personTypeClass = (type: PersonType) => type.toLowerCase().replace(" ", "-");
 
-function calculateScenario(scenario: Scenario, people: Person[]) {
+function calculateScenario(scenario: ProjectPlan, people: Person[]) {
   const personMap = new Map(people.map((person) => [person.id, person]));
   const groups: Phase[][] = [];
   scenario.phases.forEach((phase) => {
@@ -502,15 +504,16 @@ function calculateScenario(scenario: Scenario, people: Person[]) {
   const grossMargin = quote > 0 ? (grossProfit / quote) * 100 : 0;
   const guardedMargin = quote > 0 ? (guardedProfit / quote) * 100 : 0;
 
-  const warnings: string[] = [];
-  if (!scenario.workingDays.length) warnings.push("Select at least one working weekday.");
-  if (!scenario.phases.length) warnings.push("Add at least one delivery phase.");
-  if (scenario.phases.some((phase) => !phase.assignments.length)) warnings.push("One or more phases have no people assigned.");
+  const planningWarnings: string[] = [];
+  const pricingWarnings: string[] = [];
+  if (!scenario.workingDays.length) planningWarnings.push("Select at least one working weekday.");
+  if (!scenario.phases.length) planningWarnings.push("Add at least one delivery phase.");
+  if (scenario.phases.some((phase) => !phase.assignments.length)) planningWarnings.push("One or more phases have no people assigned.");
   if (scenario.phases.some((phase) => phase.assignments.some((assignment) => assignment.hoursPerDay > 24))) {
-    warnings.push("An assignment exceeds 24 hours per day.");
+    planningWarnings.push("An assignment exceeds 24 hours per day.");
   }
-  if (quote < safePrice) warnings.push("The quote is below the risk-adjusted target margin.");
-  if (guardedProfit < 0) warnings.push("The quote is loss-making after the risk reserve.");
+  if (quote < safePrice) pricingWarnings.push("The quote is below the risk-adjusted target margin.");
+  if (guardedProfit < 0) pricingWarnings.push("The quote is loss-making after the risk reserve.");
 
   return {
     rawHours,
@@ -534,49 +537,61 @@ function calculateScenario(scenario: Scenario, people: Person[]) {
     projectEnd,
     phaseResults,
     expenseResults,
-    warnings,
+    planningWarnings,
+    pricingWarnings,
+    warnings: [...planningWarnings, ...pricingWarnings],
   };
 }
 
-const bytesToBase64 = (bytes: Uint8Array) => {
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
-};
-
-const base64ToBytes = (value: string) => {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-};
-
-async function encryptedPayload(workspace: Workspace, password: string) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = pbkdf2(sha256, password, salt, { c: 250000, dkLen: 32 });
-  const data = gcm(key, iv).encrypt(utf8ToBytes(JSON.stringify(workspace)));
-  return {
-    format: "voxe-pricing-encrypted",
-    version: 1,
-    salt: bytesToBase64(salt),
-    iv: bytesToBase64(iv),
-    data: bytesToBase64(data),
-  };
-}
-
-async function decryptPayload(payload: Record<string, unknown>, password: string): Promise<Workspace> {
-  const salt = base64ToBytes(String(payload.salt));
-  const iv = base64ToBytes(String(payload.iv));
-  const key = pbkdf2(sha256, password, salt, { c: 250000, dkLen: 32 });
-  const plain = gcm(key, iv).decrypt(base64ToBytes(String(payload.data)));
-  return JSON.parse(bytesToUtf8(plain)) as Workspace;
-}
-
-const isWorkspace = (value: unknown): value is Workspace => {
+const isProjectPlan = (value: unknown): value is ProjectPlan => {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<Workspace>;
-  return candidate.app === "voxe-pricing-studio" && Array.isArray(candidate.people) && Array.isArray(candidate.scenarios);
+  const candidate = value as Partial<ProjectPlan>;
+  return (
+    typeof candidate.projectName === "string" &&
+    typeof candidate.startDate === "string" &&
+    typeof candidate.currency === "string" &&
+    Array.isArray(candidate.workingDays) &&
+    Array.isArray(candidate.holidays) &&
+    Array.isArray(candidate.phases) &&
+    Array.isArray(candidate.expenses) &&
+    Array.isArray(candidate.modifiers)
+  );
+};
+
+const normalizeWorkspace = (value: unknown): Workspace | null => {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as {
+    app?: unknown;
+    people?: unknown;
+    project?: unknown;
+    activeScenarioId?: unknown;
+    scenarios?: unknown;
+  };
+  if (candidate.app !== "voxe-pricing-studio" || !Array.isArray(candidate.people)) return null;
+
+  let project = candidate.project;
+  if (!isProjectPlan(project)) {
+    if (!Array.isArray(candidate.scenarios) || !candidate.scenarios.length) return null;
+    const activeProject = candidate.scenarios.find((item) => (
+      item &&
+      typeof item === "object" &&
+      "id" in item &&
+      item.id === candidate.activeScenarioId
+    )) ?? candidate.scenarios[0];
+    if (!isProjectPlan(activeProject)) return null;
+    const migratedProject = { ...activeProject } as Record<string, unknown>;
+    delete migratedProject.id;
+    delete migratedProject.name;
+    project = migratedProject;
+  }
+  if (!isProjectPlan(project)) return null;
+
+  return {
+    app: "voxe-pricing-studio",
+    schemaVersion: 2,
+    people: candidate.people as Person[],
+    project,
+  };
 };
 
 function downloadJson(value: unknown, filename: string) {
@@ -595,6 +610,374 @@ const safeFilename = (value: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "voxe-project";
+
+function LiveBackground() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const colors = ["157, 126, 255", "61, 218, 199", "226, 91, 210"];
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    let animationFrame = 0;
+    let reducedMotion = motionPreference.matches;
+    let pointerX = -1000;
+    let pointerY = -1000;
+    let particles: Array<{
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      radius: number;
+      color: string;
+      phase: number;
+    }> = [];
+    let comets: Array<{
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      length: number;
+      thickness: number;
+      color: string;
+    }> = [];
+
+    const createParticles = () => {
+      const count = Math.min(88, Math.max(38, Math.floor((width * height) / 22000)));
+      particles = Array.from({ length: count }, (_, index) => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.44,
+        vy: (Math.random() - 0.5) * 0.38,
+        radius: 0.8 + Math.random() * 1.7,
+        color: colors[index % colors.length],
+        phase: Math.random() * Math.PI * 2,
+      }));
+      comets = Array.from({ length: 4 }, (_, index) => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: 1.05 + Math.random() * 1.1,
+        vy: (Math.random() - 0.5) * 0.5,
+        length: 75 + Math.random() * 105,
+        thickness: 0.7 + Math.random() * 0.8,
+        color: colors[index % colors.length],
+      }));
+    };
+
+    const resize = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.6);
+      canvas.width = Math.floor(width * pixelRatio);
+      canvas.height = Math.floor(height * pixelRatio);
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      createParticles();
+    };
+
+    const drawRibbon = (
+      time: number,
+      baseY: number,
+      amplitude: number,
+      speed: number,
+      color: string,
+      offset: number,
+    ) => {
+      const gradient = context.createLinearGradient(0, 0, width, 0);
+      gradient.addColorStop(0, "rgba(" + color + ", 0)");
+      gradient.addColorStop(0.22, "rgba(" + color + ", 0.08)");
+      gradient.addColorStop(0.55, "rgba(" + color + ", 0.18)");
+      gradient.addColorStop(0.82, "rgba(" + color + ", 0.07)");
+      gradient.addColorStop(1, "rgba(" + color + ", 0)");
+
+      context.beginPath();
+      for (let x = -40; x <= width + 40; x += 24) {
+        const y = baseY
+          + Math.sin(x * 0.0045 + time * speed + offset) * amplitude
+          + Math.sin(x * 0.009 - time * speed * 0.7 + offset) * amplitude * 0.34;
+        if (x === -40) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+      context.strokeStyle = gradient;
+      context.lineWidth = Math.max(28, Math.min(58, width * 0.035));
+      context.shadowBlur = 42;
+      context.shadowColor = "rgba(" + color + ", 0.2)";
+      context.stroke();
+      context.shadowBlur = 0;
+    };
+
+    const draw = (timestamp: number) => {
+      const time = timestamp * 0.001;
+      context.clearRect(0, 0, width, height);
+      context.globalCompositeOperation = "screen";
+
+      drawRibbon(time, height * 0.24, height * 0.065, 0.34, colors[0], 0.4);
+      drawRibbon(time, height * 0.58, height * 0.085, -0.28, colors[1], 2.1);
+      drawRibbon(time, height * 0.83, height * 0.055, 0.25, colors[2], 4.2);
+
+      if (pointerX > -500) {
+        const pointerGlow = context.createRadialGradient(pointerX, pointerY, 0, pointerX, pointerY, 145);
+        pointerGlow.addColorStop(0, "rgba(149, 119, 255, 0.07)");
+        pointerGlow.addColorStop(0.5, "rgba(65, 214, 198, 0.025)");
+        pointerGlow.addColorStop(1, "rgba(65, 214, 198, 0)");
+        context.beginPath();
+        context.arc(pointerX, pointerY, 145, 0, Math.PI * 2);
+        context.fillStyle = pointerGlow;
+        context.fill();
+      }
+
+      comets.forEach((comet) => {
+        if (!reducedMotion) {
+          comet.x += comet.vx;
+          comet.y += comet.vy;
+          if (comet.x - comet.length > width || comet.y < -80 || comet.y > height + 80) {
+            comet.x = -comet.length - Math.random() * width * 0.3;
+            comet.y = Math.random() * height;
+            comet.vx = 1.05 + Math.random() * 1.1;
+            comet.vy = (Math.random() - 0.5) * 0.5;
+          }
+        }
+
+        const tailX = comet.x - comet.vx * comet.length;
+        const tailY = comet.y - comet.vy * comet.length;
+        const trail = context.createLinearGradient(tailX, tailY, comet.x, comet.y);
+        trail.addColorStop(0, "rgba(" + comet.color + ", 0)");
+        trail.addColorStop(0.72, "rgba(" + comet.color + ", 0.12)");
+        trail.addColorStop(1, "rgba(" + comet.color + ", 0.68)");
+        context.beginPath();
+        context.moveTo(tailX, tailY);
+        context.lineTo(comet.x, comet.y);
+        context.strokeStyle = trail;
+        context.lineWidth = comet.thickness;
+        context.shadowBlur = 12;
+        context.shadowColor = "rgba(" + comet.color + ", 0.45)";
+        context.stroke();
+        context.shadowBlur = 0;
+      });
+
+      particles.forEach((particle, index) => {
+        if (!reducedMotion) {
+          particle.x += particle.vx + Math.sin(time * 0.76 + particle.phase) * 0.075;
+          particle.y += particle.vy + Math.cos(time * 0.66 + particle.phase) * 0.065;
+
+          const pointerDistanceX = pointerX - particle.x;
+          const pointerDistanceY = pointerY - particle.y;
+          const pointerDistance = Math.hypot(pointerDistanceX, pointerDistanceY);
+          if (pointerDistance < 190 && pointerDistance > 1) {
+            const influence = (1 - pointerDistance / 190) * 0.006;
+            particle.x += pointerDistanceX * influence;
+            particle.y += pointerDistanceY * influence;
+          }
+
+          if (particle.x < -20) particle.x = width + 20;
+          if (particle.x > width + 20) particle.x = -20;
+          if (particle.y < -20) particle.y = height + 20;
+          if (particle.y > height + 20) particle.y = -20;
+        }
+
+        for (let nextIndex = index + 1; nextIndex < particles.length; nextIndex += 1) {
+          const next = particles[nextIndex];
+          const distance = Math.hypot(next.x - particle.x, next.y - particle.y);
+          if (distance > 160) continue;
+          context.beginPath();
+          context.moveTo(particle.x, particle.y);
+          context.lineTo(next.x, next.y);
+          context.strokeStyle = "rgba(150, 132, 220, " + ((1 - distance / 160) * 0.16) + ")";
+          context.lineWidth = 0.65;
+          context.stroke();
+        }
+
+        context.beginPath();
+        context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+        context.fillStyle = "rgba(" + particle.color + ", 0.68)";
+        context.shadowBlur = 13;
+        context.shadowColor = "rgba(" + particle.color + ", 0.58)";
+        context.fill();
+        context.shadowBlur = 0;
+
+        if (index % 9 === 0) {
+          const pulse = (time * 0.72 + particle.phase / (Math.PI * 2)) % 1;
+          context.beginPath();
+          context.arc(particle.x, particle.y, 8 + pulse * 26, 0, Math.PI * 2);
+          context.strokeStyle = "rgba(" + particle.color + ", " + ((1 - pulse) * 0.16) + ")";
+          context.lineWidth = 0.8;
+          context.stroke();
+        }
+      });
+
+      context.globalCompositeOperation = "source-over";
+      if (!reducedMotion && !document.hidden) animationFrame = window.requestAnimationFrame(draw);
+    };
+
+    const start = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+    };
+    const handlePointerLeave = () => {
+      pointerX = -1000;
+      pointerY = -1000;
+    };
+    const handleVisibility = () => {
+      if (document.hidden) window.cancelAnimationFrame(animationFrame);
+      else start();
+    };
+    const handleMotionPreference = (event: MediaQueryListEvent) => {
+      reducedMotion = event.matches;
+      start();
+    };
+
+    resize();
+    start();
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.addEventListener("pointerleave", handlePointerLeave);
+    document.addEventListener("visibilitychange", handleVisibility);
+    motionPreference.addEventListener("change", handleMotionPreference);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerleave", handlePointerLeave);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      motionPreference.removeEventListener("change", handleMotionPreference);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="live-background-canvas" aria-hidden="true" />;
+}
+
+type GlowWaypoint = {
+  x: number;
+  y: number;
+  scale: number;
+  opacity: number;
+};
+
+const glowTransform = (waypoint: GlowWaypoint) =>
+  `translate3d(${waypoint.x}vw, ${waypoint.y}vh, 0) scale(${waypoint.scale})`;
+
+function RandomAmbientGlows() {
+  const glowRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  useEffect(() => {
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const animations: Array<Animation | undefined> = [];
+    const timers: Array<number | undefined> = [];
+    let disposed = false;
+
+    const randomWaypoint = (): GlowWaypoint => ({
+      x: -4 + Math.random() * 104,
+      y: -6 + Math.random() * 104,
+      scale: 0.82 + Math.random() * 0.38,
+      opacity: 0.22 + Math.random() * 0.13,
+    });
+
+    const placeGlow = (element: HTMLDivElement, waypoint: GlowWaypoint) => {
+      element.style.transform = glowTransform(waypoint);
+      element.style.opacity = String(waypoint.opacity);
+    };
+
+    const stopMotion = () => {
+      timers.forEach((timer, index) => {
+        if (timer !== undefined) window.clearTimeout(timer);
+        timers[index] = undefined;
+      });
+      animations.forEach((animation, index) => {
+        if (animation) {
+          animation.onfinish = null;
+          animation.cancel();
+        }
+        animations[index] = undefined;
+      });
+    };
+
+    const travel = (element: HTMLDivElement, index: number, current: GlowWaypoint) => {
+      if (disposed || motionPreference.matches) return;
+
+      let next = randomWaypoint();
+      let distance = Math.hypot(next.x - current.x, next.y - current.y);
+      for (let attempt = 0; attempt < 4 && distance < 26; attempt += 1) {
+        next = randomWaypoint();
+        distance = Math.hypot(next.x - current.x, next.y - current.y);
+      }
+
+      const duration = Math.max(2200, Math.min(6200, distance * (55 + Math.random() * 20)));
+      const animation = element.animate(
+        [
+          { transform: glowTransform(current), opacity: current.opacity },
+          { transform: glowTransform(next), opacity: next.opacity },
+        ],
+        {
+          duration,
+          easing: "cubic-bezier(0.42, 0, 0.25, 1)",
+          fill: "forwards",
+        },
+      );
+      animations[index] = animation;
+
+      animation.onfinish = () => {
+        if (disposed) return;
+        placeGlow(element, next);
+        animation.cancel();
+        animations[index] = undefined;
+        timers[index] = window.setTimeout(
+          () => travel(element, index, next),
+          60 + Math.random() * 300,
+        );
+      };
+    };
+
+    const startMotion = () => {
+      stopMotion();
+      glowRefs.current.forEach((element, index) => {
+        if (!element) return;
+        const initial = randomWaypoint();
+        placeGlow(element, initial);
+        if (!motionPreference.matches) {
+          timers[index] = window.setTimeout(
+            () => travel(element, index, initial),
+            80 + index * 110 + Math.random() * 240,
+          );
+        }
+      });
+    };
+
+    const handleMotionPreference = () => startMotion();
+    startMotion();
+    motionPreference.addEventListener("change", handleMotionPreference);
+
+    return () => {
+      disposed = true;
+      stopMotion();
+      motionPreference.removeEventListener("change", handleMotionPreference);
+    };
+  }, []);
+
+  const glowNames = ["one", "two", "three", "four", "five"];
+  return (
+    <>
+      {glowNames.map((name, index) => (
+        <div
+          key={name}
+          ref={(element) => {
+            glowRefs.current[index] = element;
+          }}
+          className={`ambient ambient-${name}`}
+        />
+      ))}
+    </>
+  );
+}
 
 function Modal({
   title,
@@ -786,6 +1169,249 @@ function GlassSelect({
   );
 }
 
+function GlassDatePicker({
+  value,
+  onChange,
+  ariaLabel,
+  clearable = false,
+  min,
+  max,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  clearable?: boolean;
+  min?: string;
+  max?: string;
+  disabled?: boolean;
+}) {
+  const selectedDate = calendarDateFromString(value);
+  const [open, setOpen] = useState(false);
+  const [calendarStyle, setCalendarStyle] = useState<React.CSSProperties>({});
+  const [viewMonth, setViewMonth] = useState(() => {
+    const initial = selectedDate ?? new Date();
+    return new Date(initial.getFullYear(), initial.getMonth(), 1, 12);
+  });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
+  const calendarId = useId();
+  const selectedKey = selectedDate ? dateKey(selectedDate) : "";
+  const today = new Date();
+  const todayKey = dateKey(today);
+  const minDate = min ? calendarDateFromString(min) : null;
+  const maxDate = max ? calendarDateFromString(max) : null;
+
+  const calendarDays = useMemo(() => {
+    const firstVisibleDate = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1 - viewMonth.getDay(), 12);
+    return Array.from({ length: 42 }, (_, index) => addDays(firstVisibleDate, index));
+  }, [viewMonth]);
+
+  const positionCalendar = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const viewportPadding = 12;
+    const gap = 8;
+    const width = Math.min(340, window.innerWidth - viewportPadding * 2);
+    const estimatedHeight = Math.min(390, window.innerHeight - viewportPadding * 2);
+    const availableBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const availableAbove = rect.top - viewportPadding;
+    const top = availableBelow >= estimatedHeight
+      ? rect.bottom + gap
+      : availableAbove >= estimatedHeight
+        ? Math.max(viewportPadding, rect.top - estimatedHeight - gap)
+        : Math.max(viewportPadding, Math.min(rect.bottom + gap, window.innerHeight - estimatedHeight - viewportPadding));
+    setCalendarStyle({
+      left: Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - width - viewportPadding)),
+      top,
+      width,
+      maxHeight: window.innerHeight - viewportPadding * 2,
+    });
+  }, []);
+
+  const openCalendar = () => {
+    if (disabled) return;
+    const initial = selectedDate ?? new Date();
+    setViewMonth(new Date(initial.getFullYear(), initial.getMonth(), 1, 12));
+    positionCalendar();
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !calendarRef.current?.contains(target)) setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const handlePosition = () => positionCalendar();
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handlePosition);
+    window.addEventListener("scroll", handlePosition, true);
+    window.requestAnimationFrame(() => {
+      calendarRef.current?.querySelector<HTMLButtonElement>(
+        '.glass-calendar-day[aria-pressed="true"], .glass-calendar-day[aria-current="date"], .glass-calendar-day:not(.outside-month)',
+      )?.focus();
+    });
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handlePosition);
+      window.removeEventListener("scroll", handlePosition, true);
+    };
+  }, [open, positionCalendar]);
+
+  const chooseDate = (date: Date) => {
+    onChange(dateKey(date));
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const focusCalendarDate = (date: Date) => {
+    if (date.getMonth() !== viewMonth.getMonth() || date.getFullYear() !== viewMonth.getFullYear()) {
+      setViewMonth(new Date(date.getFullYear(), date.getMonth(), 1, 12));
+    }
+    window.requestAnimationFrame(() => {
+      calendarRef.current?.querySelector<HTMLButtonElement>(`[data-date="${dateKey(date)}"]`)?.focus();
+    });
+  };
+
+  const handleDayKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, date: Date) => {
+    let nextDate: Date | null = null;
+    if (event.key === "ArrowLeft") nextDate = addDays(date, -1);
+    if (event.key === "ArrowRight") nextDate = addDays(date, 1);
+    if (event.key === "ArrowUp") nextDate = addDays(date, -7);
+    if (event.key === "ArrowDown") nextDate = addDays(date, 7);
+    if (event.key === "Home") nextDate = addDays(date, -date.getDay());
+    if (event.key === "End") nextDate = addDays(date, 6 - date.getDay());
+    if (event.key === "PageUp" || event.key === "PageDown") {
+      const monthDelta = event.key === "PageUp" ? -1 : 1;
+      const targetMonth = new Date(date.getFullYear(), date.getMonth() + monthDelta, 1, 12);
+      const lastDay = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0, 12).getDate();
+      nextDate = new Date(targetMonth.getFullYear(), targetMonth.getMonth(), Math.min(date.getDate(), lastDay), 12);
+    }
+    if (!nextDate) return;
+    event.preventDefault();
+    if ((minDate && nextDate < minDate) || (maxDate && nextDate > maxDate)) return;
+    focusCalendarDate(nextDate);
+  };
+
+  const calendar = open && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          id={calendarId}
+          ref={calendarRef}
+          className="glass-date-menu"
+          role="dialog"
+          aria-label={`${ariaLabel} calendar`}
+          style={calendarStyle}
+          onBlur={() => window.requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (!calendarRef.current?.contains(active) && active !== triggerRef.current) setOpen(false);
+          })}
+        >
+          <div className="glass-calendar-header">
+            <button
+              type="button"
+              className="calendar-nav-button"
+              aria-label="Previous month"
+              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1, 12))}
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <strong aria-live="polite">{calendarMonthFormat.format(viewMonth)}</strong>
+            <button
+              type="button"
+              className="calendar-nav-button"
+              aria-label="Next month"
+              onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1, 12))}
+            >
+              <ChevronRight size={17} />
+            </button>
+          </div>
+          <div className="glass-calendar-weekdays" aria-hidden="true">
+            {DAY_LABELS.map((day) => <span key={day}>{day.slice(0, 2)}</span>)}
+          </div>
+          <div className="glass-calendar-grid" aria-label={calendarMonthFormat.format(viewMonth)}>
+            {calendarDays.map((date) => {
+              const key = dateKey(date);
+              const outsideMonth = date.getMonth() !== viewMonth.getMonth();
+              const isSelected = key === selectedKey;
+              const isToday = key === todayKey;
+              const isDisabled = Boolean((minDate && date < minDate) || (maxDate && date > maxDate));
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  data-date={key}
+                  className={`glass-calendar-day${outsideMonth ? " outside-month" : ""}${isSelected ? " selected" : ""}${isToday ? " today" : ""}`}
+                  aria-label={calendarDateFormat.format(date)}
+                  aria-pressed={isSelected}
+                  aria-current={isToday ? "date" : undefined}
+                  disabled={isDisabled}
+                  tabIndex={isSelected || (!selectedKey && isToday) || (!selectedKey && !calendarDays.some((item) => dateKey(item) === todayKey) && !outsideMonth && date.getDate() === 1) ? 0 : -1}
+                  onClick={() => chooseDate(date)}
+                  onKeyDown={(event) => handleDayKeyDown(event, date)}
+                >
+                  {date.getDate()}
+                </button>
+              );
+            })}
+          </div>
+          <div className="glass-calendar-footer">
+            <button type="button" onClick={() => chooseDate(new Date())}>Today</button>
+            {clearable && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="glass-select-trigger glass-date-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-controls={calendarId}
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => open ? setOpen(false) : openCalendar()}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            openCalendar();
+          }
+        }}
+      >
+        <span className={selectedDate ? "" : "placeholder"}>{selectedDate ? friendlyDate(value) : "Select date"}</span>
+        <CalendarDays size={16} />
+      </button>
+      {calendar}
+    </>
+  );
+}
+
 function NumberStepper({
   value,
   onChange,
@@ -886,31 +1512,40 @@ export default function Home() {
   const [workspace, setWorkspace] = useState<Workspace>(() => initialWorkspace());
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<ViewMode>("internal");
+  const [planningMode, setPlanningMode] = useState(true);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isNewPerson, setIsNewPerson] = useState(false);
   const [phasePickerId, setPhasePickerId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
-  const [backupOpen, setBackupOpen] = useState(false);
-  const [backupPassword, setBackupPassword] = useState("");
-  const [pendingImport, setPendingImport] = useState<Record<string, unknown> | null>(null);
-  const [importPassword, setImportPassword] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [revealPricingOpen, setRevealPricingOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [holidayDraft, setHolidayDraft] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const scenario = workspace.scenarios.find((item) => item.id === workspace.activeScenarioId) ?? workspace.scenarios[0];
+  const scenario = workspace.project;
   const calculation = useMemo(
     () => calculateScenario(scenario, workspace.people),
     [scenario, workspace.people],
   );
+  const assignedPeopleCount = useMemo(
+    () => new Set(scenario.phases.flatMap((phase) => phase.assignments.map((assignment) => assignment.personId))).size,
+    [scenario.phases],
+  );
+  const visibleWarnings = planningMode ? calculation.planningWarnings : calculation.warnings;
+  const visibleModifiers = planningMode
+    ? scenario.modifiers.filter((modifier) => modifier.target === "effort")
+    : scenario.modifiers;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       try {
+        setPlanningMode(localStorage.getItem(PLANNING_MODE_KEY) === "true");
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved) as unknown;
-          if (isWorkspace(parsed) && parsed.scenarios.length) setWorkspace(parsed);
+          const normalized = normalizeWorkspace(parsed);
+          if (normalized) setWorkspace(normalized);
         }
       } catch {
         // A damaged browser draft should never block the calculator.
@@ -924,6 +1559,11 @@ export default function Home() {
     if (!hydrated) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
   }, [workspace, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(PLANNING_MODE_KEY, String(planningMode));
+  }, [planningMode, hydrated]);
 
   useEffect(() => {
     const trustedLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
@@ -940,12 +1580,10 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const updateScenario = (patch: Partial<Scenario>) => {
+  const updateScenario = (patch: Partial<ProjectPlan>) => {
     setWorkspace((current) => ({
       ...current,
-      scenarios: current.scenarios.map((item) =>
-        item.id === current.activeScenarioId ? { ...item, ...patch } : item,
-      ),
+      project: { ...current.project, ...patch },
     }));
   };
 
@@ -1037,13 +1675,13 @@ export default function Home() {
     setWorkspace((current) => ({
       ...current,
       people: current.people.filter((person) => person.id !== personId),
-      scenarios: current.scenarios.map((item) => ({
-        ...item,
-        phases: item.phases.map((phase) => ({
+      project: {
+        ...current.project,
+        phases: current.project.phases.map((phase) => ({
           ...phase,
           assignments: phase.assignments.filter((assignment) => assignment.personId !== personId),
         })),
-      })),
+      },
     }));
     setEditingPerson(null);
     setToast("Person removed from the workspace");
@@ -1070,7 +1708,7 @@ export default function Home() {
     updateScenario({
       modifiers: [
         ...scenario.modifiers,
-        { id: uid(), name: "New modifier", kind: "percentage", target: "price", value: 0 },
+        { id: uid(), name: planningMode ? "New effort adjustment" : "New modifier", kind: "percentage", target: planningMode ? "effort" : "price", value: 0 },
       ],
     });
   };
@@ -1083,48 +1721,39 @@ export default function Home() {
     });
   };
 
-  const duplicateScenario = () => {
-    const copy: Scenario = JSON.parse(JSON.stringify(scenario)) as Scenario;
-    copy.id = uid();
-    copy.name = scenario.name + " copy";
-    copy.phases = copy.phases.map((phase) => ({ ...phase, id: uid() }));
-    copy.expenses = copy.expenses.map((expense) => ({ ...expense, id: uid() }));
-    copy.modifiers = copy.modifiers.map((modifier) => ({ ...modifier, id: uid() }));
-    setWorkspace((current) => ({
-      ...current,
-      activeScenarioId: copy.id,
-      scenarios: [...current.scenarios, copy],
-    }));
-    setToast("Scenario duplicated");
-  };
-
-  const deleteScenario = () => {
-    if (workspace.scenarios.length <= 1) return;
-    const remaining = workspace.scenarios.filter((item) => item.id !== scenario.id);
-    setWorkspace((current) => ({
-      ...current,
-      activeScenarioId: remaining[0].id,
-      scenarios: remaining,
-    }));
-    setToast("Scenario removed");
-  };
-
-  const exportEncrypted = async () => {
-    if (backupPassword.length < 8) {
-      setToast("Use at least 8 characters for the backup password");
+  const downloadProject = () => {
+    if (planningMode) {
+      setToast("Turn off planning mode to export pricing data");
       return;
     }
-    const payload = await encryptedPayload(workspace, backupPassword);
-    downloadJson(payload, safeFilename(scenario.projectName) + ".voxe.enc.json");
-    setBackupPassword("");
-    setBackupOpen(false);
-    setToast("Encrypted backup downloaded");
+    downloadJson(workspace, safeFilename(scenario.projectName) + ".voxe.json");
+    setExportOpen(false);
+    setToast("Project file downloaded");
   };
 
-  const exportPlain = () => {
-    downloadJson(workspace, safeFilename(scenario.projectName) + ".voxe.json");
-    setBackupOpen(false);
-    setToast("Plain workspace file downloaded");
+  const printClientEstimate = () => {
+    setExportOpen(false);
+    setView("client");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.print());
+    });
+  };
+
+  const togglePlanningMode = () => {
+    if (planningMode) {
+      setExportOpen(false);
+      setRevealPricingOpen(true);
+      return;
+    }
+    setPlanningMode(true);
+    setExportOpen(false);
+    setToast("Planning mode on — pricing hidden");
+  };
+
+  const revealPricing = () => {
+    setPlanningMode(false);
+    setRevealPricingOpen(false);
+    setToast("Planning mode off — pricing restored");
   };
 
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1133,30 +1762,12 @@ export default function Home() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
-      if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).format === "voxe-pricing-encrypted") {
-        setPendingImport(parsed as Record<string, unknown>);
-        setImportPassword("");
-        return;
-      }
-      if (!isWorkspace(parsed) || !parsed.scenarios.length) throw new Error("Invalid workspace");
-      setWorkspace(parsed);
-      setToast("Workspace imported");
+      const normalized = normalizeWorkspace(parsed);
+      if (!normalized) throw new Error("Invalid workspace");
+      setWorkspace(normalized);
+      setToast(planningMode ? "Workspace imported — pricing remains hidden" : "Workspace imported");
     } catch {
       setToast("That file is not a valid Voxe workspace");
-    }
-  };
-
-  const unlockImport = async () => {
-    if (!pendingImport) return;
-    try {
-      const parsed = await decryptPayload(pendingImport, importPassword);
-      if (!isWorkspace(parsed) || !parsed.scenarios.length) throw new Error("Invalid workspace");
-      setWorkspace(parsed);
-      setPendingImport(null);
-      setImportPassword("");
-      setToast("Encrypted workspace imported");
-    } catch {
-      setToast("Could not decrypt that backup");
     }
   };
 
@@ -1171,74 +1782,88 @@ export default function Home() {
   const expenseResult = (expenseId: string) => calculation.expenseResults.find((item) => item.id === expenseId);
 
   return (
-    <main className="app-shell">
+    <main className={"app-shell " + (planningMode ? "planning-mode" : "pricing-mode")}>
       <div className="animated-backdrop" aria-hidden="true">
         <div className="backdrop-grid" />
-        <div className="ambient ambient-one" />
-        <div className="ambient ambient-two" />
-        <div className="ambient ambient-three" />
+        <LiveBackground />
+        <RandomAmbientGlows />
         <div className="backdrop-glow" />
       </div>
 
       <header className="topbar glass-panel">
-        <div className="brand-block">
-          <div className="brand-mark">V</div>
-          <div>
-            <p>VOXE GROUP</p>
-            <strong>Pricing Studio</strong>
-          </div>
+        <div className="nav-brand" aria-label="Voxe Group">
+          <div className="brand-mark" aria-hidden="true">V</div>
+          <div className="brand-wordmark"><strong>VOXE</strong><span>GROUP</span></div>
         </div>
 
-        <div className="project-identity">
-          <span>Project</span>
-          <input
-            aria-label="Project name"
-            value={scenario.projectName}
-            onChange={(event) => updateScenario({ projectName: event.target.value })}
-          />
-        </div>
+        <label className="project-identity">
+          <span className="project-identity-icon"><BriefcaseBusiness size={17} /></span>
+          <span className="project-identity-copy">
+            <small>Current project</small>
+            <input
+              aria-label="Project name"
+              value={scenario.projectName}
+              onChange={(event) => updateScenario({ projectName: event.target.value })}
+            />
+          </span>
+        </label>
 
         <div className="topbar-actions">
-          <span className="local-badge"><ShieldCheck size={14} /> Local only</span>
-          <div className="view-toggle" aria-label="View mode">
-            <button className={view === "internal" ? "active" : ""} onClick={() => setView("internal")}>
-              Internal
+          <div className="mode-controls">
+            <button
+              type="button"
+              className={"privacy-switch " + (planningMode ? "active" : "")}
+              role="switch"
+              aria-checked={planningMode}
+              aria-label={planningMode ? "Turn off planning mode and show pricing" : "Turn on planning mode and hide pricing"}
+              onClick={togglePlanningMode}
+            >
+              <span className="privacy-switch-icon">{planningMode ? <EyeOff size={15} /> : <Eye size={15} />}</span>
+              <span className="privacy-switch-copy"><strong>Planning mode</strong><small>{planningMode ? "Pricing hidden" : "Pricing visible"}</small></span>
+              <span className="privacy-switch-track" aria-hidden="true" />
             </button>
-            <button className={view === "client" ? "active" : ""} onClick={() => setView("client")}>
-              Client
+            <div className="view-toggle" data-view={view} role="group" aria-label="Interface view">
+              <button type="button" aria-pressed={view === "internal"} className={view === "internal" ? "active" : ""} onClick={() => setView("internal")}>
+                Internal
+              </button>
+              <button type="button" aria-pressed={view === "client"} className={view === "client" ? "active" : ""} onClick={() => setView("client")}>
+                Client
+              </button>
+            </div>
+          </div>
+          <span className="nav-divider" aria-hidden="true" />
+          <div className="file-actions">
+            <button type="button" className="button secondary topbar-import" onClick={() => fileInput.current?.click()}>
+              <Upload size={16} /> Import
+            </button>
+            <button type="button" className="button primary topbar-export" onClick={() => setExportOpen(true)}>
+              <ArrowDownToLine size={16} /> Export
             </button>
           </div>
-          {view === "client" && (
-            <button className="button secondary" onClick={() => window.print()}>
-              <Printer size={16} /> Print
-            </button>
-          )}
-          <button className="button secondary" onClick={() => fileInput.current?.click()}>
-            <Upload size={16} /> Import
-          </button>
-          <button className="button primary" onClick={() => setBackupOpen(true)}>
-            <ArrowDownToLine size={16} /> Export
-          </button>
           <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={handleImport} />
         </div>
       </header>
 
       {view === "client" ? (
-        <section className="client-sheet glass-panel">
-          <div className="client-hero">
+        <section className={"client-sheet glass-panel " + (planningMode ? "planning-sheet" : "")}>
+          <div className={"client-hero " + (planningMode ? "planning" : "")}>
             <div>
-              <p className="eyebrow">Project estimate</p>
+              <p className="eyebrow">{planningMode ? "Team planning brief" : "Project estimate"}</p>
               <h1>{scenario.projectName || "Untitled project"}</h1>
               <p>
-                A structured delivery estimate covering {scenario.phases.length} phases, from kickoff through launch.
+                A structured delivery {planningMode ? "plan" : "estimate"} covering {scenario.phases.length} phases, from kickoff through launch.
               </p>
             </div>
-            <div className="client-price">
-              <span>Estimated investment</span>
-              <strong>{currencyFormat(scenario.currency, calculation.quote)}</strong>
-              <small>Prepared by Voxe Group</small>
-            </div>
+            {!planningMode && (
+              <div className="client-price">
+                <span>Estimated investment</span>
+                <strong>{currencyFormat(scenario.currency, calculation.quote)}</strong>
+                <small>Prepared by Voxe Group</small>
+              </div>
+            )}
           </div>
+
+          {planningMode && <div className="planning-print-note"><EyeOff size={16} /><span>Pricing intentionally omitted for team planning.</span></div>}
 
           <div className="client-metrics">
             <div><CalendarDays size={18} /><span>{calculation.totalWorkingDays} working days</span></div>
@@ -1267,139 +1892,186 @@ export default function Home() {
           </div>
 
           <footer className="client-footer">
-            <span>Generated locally • Confidential estimate</span>
+            <span>{planningMode ? "Generated locally • Private team planning brief" : "Generated locally • Confidential estimate"}</span>
             <strong>Voxe Group</strong>
           </footer>
         </section>
       ) : (
         <>
-          <section className="command-row">
-            <div className="scenario-control glass-panel">
-              <span>Scenario</span>
-              <GlassSelect
-                ariaLabel="Active scenario"
-                className="scenario-select"
-                value={workspace.activeScenarioId}
-                options={workspace.scenarios.map((item) => ({ value: item.id, label: item.name }))}
-                onChange={(activeScenarioId) => setWorkspace((current) => ({ ...current, activeScenarioId }))}
-              />
-              <button className="icon-button" onClick={duplicateScenario} title="Duplicate scenario"><Copy size={16} /></button>
-              <button
-                className="icon-button danger"
-                onClick={deleteScenario}
-                disabled={workspace.scenarios.length <= 1}
-                title="Delete scenario"
-              ><Trash2 size={16} /></button>
-            </div>
-            <label className="scenario-name glass-panel">
-              <span>Scenario name</span>
-              <input value={scenario.name} onChange={(event) => updateScenario({ name: event.target.value })} />
-            </label>
-            <div className="autosave-status"><HardDrive size={14} /> {hydrated ? "Saved on this device" : "Loading draft"}</div>
+          <section className={"metric-grid " + (planningMode ? "planning-metrics" : "pricing-metrics")}>
+            {planningMode ? (
+              <>
+                <article className="metric-card glass-panel featured">
+                  <div className="metric-icon green"><CalendarDays size={20} /></div>
+                  <div><span>Delivery plan</span><strong>{calculation.totalWorkingDays} days</strong><small>{scenario.phases.length} phases • ends {friendlyDate(calculation.projectEnd)}</small></div>
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon violet"><Clock3 size={20} /></div>
+                  <div><span>Calendar span</span><strong>{calculation.calendarDays} days</strong><small>{friendlyDate(calculation.projectStart)} → {friendlyDate(calculation.projectEnd)}</small></div>
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon"><Sparkles size={20} /></div>
+                  <div><span>Scheduled effort</span><strong>{Math.round(calculation.totalHours)}h</strong><small>Across all delivery phases</small></div>
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon orange"><Users size={20} /></div>
+                  <div><span>Assigned team</span><strong>{assignedPeopleCount}</strong><small>{workspace.people.length} people available</small></div>
+                </article>
+              </>
+            ) : (
+              <>
+                <article className="metric-card glass-panel featured">
+                  <div className="metric-icon"><CircleDollarSign size={20} /></div>
+                  <div><span>Client quote</span><strong>{currencyFormat(scenario.currency, calculation.quote, true)}</strong><small>Rounded to {currencyFormat(scenario.currency, scenario.rounding)}</small></div>
+                  <TrendingUp size={18} className="metric-corner" />
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon violet"><WalletCards size={20} /></div>
+                  <div><span>Estimated cost</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost, true)}</strong><small>{currencyFormat(scenario.currency, calculation.riskAdjustedCost)} with risk</small></div>
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon green"><TrendingUp size={20} /></div>
+                  <div><span>Gross profit</span><strong className={calculation.grossProfit < 0 ? "negative" : "positive"}>{currencyFormat(scenario.currency, calculation.grossProfit, true)}</strong><small>{calculation.grossMargin.toFixed(1)}% gross margin</small></div>
+                </article>
+                <article className="metric-card glass-panel">
+                  <div className="metric-icon orange"><CalendarDays size={20} /></div>
+                  <div><span>Delivery</span><strong>{calculation.totalWorkingDays} days</strong><small>{friendlyDate(calculation.projectEnd)} • {Math.round(calculation.totalHours)}h</small></div>
+                </article>
+              </>
+            )}
           </section>
 
-          <section className="metric-grid">
-            <article className="metric-card glass-panel featured">
-              <div className="metric-icon"><CircleDollarSign size={20} /></div>
-              <div><span>Client quote</span><strong>{currencyFormat(scenario.currency, calculation.quote, true)}</strong><small>Rounded to {currencyFormat(scenario.currency, scenario.rounding)}</small></div>
-              <TrendingUp size={18} className="metric-corner" />
-            </article>
-            <article className="metric-card glass-panel">
-              <div className="metric-icon violet"><WalletCards size={20} /></div>
-              <div><span>Estimated cost</span><strong>{currencyFormat(scenario.currency, calculation.estimatedCost, true)}</strong><small>{currencyFormat(scenario.currency, calculation.riskAdjustedCost)} with risk</small></div>
-            </article>
-            <article className="metric-card glass-panel">
-              <div className="metric-icon green"><TrendingUp size={20} /></div>
-              <div><span>Gross profit</span><strong className={calculation.grossProfit < 0 ? "negative" : "positive"}>{currencyFormat(scenario.currency, calculation.grossProfit, true)}</strong><small>{calculation.grossMargin.toFixed(1)}% gross margin</small></div>
-            </article>
-            <article className="metric-card glass-panel">
-              <div className="metric-icon orange"><CalendarDays size={20} /></div>
-              <div><span>Delivery</span><strong>{calculation.totalWorkingDays} days</strong><small>{friendlyDate(calculation.projectEnd)} • {Math.round(calculation.totalHours)}h</small></div>
-            </article>
-          </section>
-
-          {calculation.warnings.length > 0 && (
+          {visibleWarnings.length > 0 && (
             <section className="warning-strip glass-panel">
               <AlertTriangle size={18} />
-              <div><strong>Pricing check</strong><span>{calculation.warnings.join(" ")}</span></div>
+              <div><strong>{planningMode ? "Planning check" : "Pricing check"}</strong><span>{visibleWarnings.join(" ")}</span></div>
             </section>
           )}
 
           <section className="settings-card glass-panel">
             <div className="section-heading">
-              <div><p className="eyebrow">01 • Foundation</p><h2>Project settings</h2></div>
-              <span className="section-note"><Info size={14} /> Days create hours once. They never multiply the final quote again.</span>
+              <div><h2 className="eyebrow section-index-title">01 • Project settings</h2></div>
             </div>
-            <div className="settings-grid">
-              <label className="field">
-                <span>Currency</span>
-                <GlassSelect
-                  ariaLabel="Currency"
-                  value={scenario.currency}
-                  options={[
-                    { value: "USD", label: "USD — US Dollar" },
-                    { value: "IQD", label: "IQD — Iraqi Dinar" },
-                    { value: "EUR", label: "EUR — Euro" },
-                    { value: "GBP", label: "GBP — Pound" },
-                  ]}
-                  onChange={(currency) => updateScenario({ currency: currency as Currency })}
-                />
-              </label>
-              <MoneyInput label="Client rate" value={scenario.clientRate} onChange={(clientRate) => updateScenario({ clientRate })} suffix="/ person-hour" min={0} />
-              <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} step={50} />
-              <MoneyInput label="Default hours / day" value={scenario.defaultHours} onChange={(defaultHours) => updateScenario({ defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
-              <MoneyInput label="Target gross margin" value={scenario.targetMargin} onChange={(targetMargin) => updateScenario({ targetMargin })} suffix="%" min={0} max={95} />
-              <MoneyInput label="Risk reserve" value={scenario.riskReserve} onChange={(riskReserve) => updateScenario({ riskReserve })} suffix="%" min={0} />
-              <label className="field">
-                <span>Rounding</span>
-                <GlassSelect
-                  ariaLabel="Quote rounding"
-                  value={String(scenario.rounding)}
-                  options={[1, 50, 100, 500, 1000, 100000].map((value) => ({ value: String(value), label: currencyFormat(scenario.currency, value) }))}
-                  onChange={(rounding) => updateScenario({ rounding: numberValue(rounding) })}
-                />
-              </label>
-              <label className="field">
-                <span>Start date</span>
-                <input type="date" value={scenario.startDate} onChange={(event) => updateScenario({ startDate: event.target.value })} />
-              </label>
-            </div>
-            <div className="schedule-row">
-              <div>
-                <span className="mini-label">Working weekdays</span>
-                <div className="day-selector">
-                  {DAY_LABELS.map((label, day) => (
-                    <button key={label} className={scenario.workingDays.includes(day) ? "active" : ""} onClick={() => toggleWorkingDay(day)}>{label}</button>
-                  ))}
+            <div className="settings-layout">
+              <section className="settings-column commercial-settings" aria-labelledby="commercial-settings-title">
+                <div className="settings-column-heading">
+                  <span className="settings-column-icon commercial" aria-hidden="true"><CircleDollarSign size={18} /></span>
+                  <div><h3 id="commercial-settings-title">Commercial</h3><small>Rates, fees and margin controls</small></div>
                 </div>
-              </div>
-              <div className="holiday-box">
-                <span className="mini-label">Excluded holidays</span>
-                <div className="holiday-add">
-                  <input type="date" value={holidayDraft} onChange={(event) => setHolidayDraft(event.target.value)} />
-                  <button
-                    className="icon-button"
-                    aria-label="Add holiday"
-                    onClick={() => {
-                      if (!holidayDraft || scenario.holidays.includes(holidayDraft)) return;
-                      updateScenario({ holidays: [...scenario.holidays, holidayDraft].sort() });
-                      setHolidayDraft("");
-                    }}
-                  ><Plus size={16} /></button>
+                {planningMode ? (
+                  <div className="pricing-hidden-state">
+                    <EyeOff size={21} />
+                    <div><strong>Pricing controls hidden</strong><span>Reveal pricing from the navigation bar when you need commercial controls.</span></div>
+                  </div>
+                ) : (
+                  <div className="settings-panel-grid commercial-grid">
+                    <label className="field">
+                      <span>Currency</span>
+                      <GlassSelect
+                        ariaLabel="Currency"
+                        value={scenario.currency}
+                        options={[
+                          { value: "USD", label: "USD — US Dollar" },
+                          { value: "IQD", label: "IQD — Iraqi Dinar" },
+                          { value: "EUR", label: "EUR — Euro" },
+                          { value: "GBP", label: "GBP — Pound" },
+                        ]}
+                        onChange={(currency) => updateScenario({ currency: currency as Currency })}
+                      />
+                    </label>
+                    <MoneyInput label="Client rate" value={scenario.clientRate} onChange={(clientRate) => updateScenario({ clientRate })} suffix="/ person-hour" min={0} />
+                    <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} step={50} />
+                    <MoneyInput label="Target gross margin" value={scenario.targetMargin} onChange={(targetMargin) => updateScenario({ targetMargin })} suffix="%" min={0} max={95} />
+                    <MoneyInput label="Risk reserve" value={scenario.riskReserve} onChange={(riskReserve) => updateScenario({ riskReserve })} suffix="%" min={0} />
+                    <label className="field">
+                      <span>Rounding</span>
+                      <GlassSelect
+                        ariaLabel="Quote rounding"
+                        value={String(scenario.rounding)}
+                        options={[1, 50, 100, 500, 1000, 100000].map((value) => ({ value: String(value), label: currencyFormat(scenario.currency, value) }))}
+                        onChange={(rounding) => updateScenario({ rounding: numberValue(rounding) })}
+                      />
+                    </label>
+                  </div>
+                )}
+              </section>
+
+              <section className="settings-column schedule-settings" aria-labelledby="schedule-settings-title">
+                <div className="settings-column-heading">
+                  <span className="settings-column-icon schedule" aria-hidden="true"><CalendarDays size={18} /></span>
+                  <div><h3 id="schedule-settings-title">Schedule & time</h3><small>Dates, capacity and working calendar</small></div>
                 </div>
-                <div className="holiday-chips">
-                  {scenario.holidays.map((holiday) => (
-                    <button key={holiday} onClick={() => updateScenario({ holidays: scenario.holidays.filter((item) => item !== holiday) })}>{holiday}<X size={12} /></button>
-                  ))}
-                  {!scenario.holidays.length && <small>No excluded dates</small>}
+                <div className="settings-panel-grid schedule-primary-grid">
+                  <MoneyInput label="Default hours / day" value={scenario.defaultHours} onChange={(defaultHours) => updateScenario({ defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
+                  <label className="field">
+                    <span>Start date</span>
+                    <GlassDatePicker
+                      value={scenario.startDate}
+                      ariaLabel="Project start date"
+                      onChange={(startDate) => updateScenario({ startDate })}
+                    />
+                  </label>
                 </div>
-              </div>
+                <div className="schedule-row">
+                  <div>
+                    <span className="mini-label" id="working-weekdays-label">Working weekdays</span>
+                    <div className="day-selector" role="group" aria-labelledby="working-weekdays-label">
+                      {DAY_LABELS.map((label, day) => (
+                        <button
+                          type="button"
+                          key={label}
+                          className={scenario.workingDays.includes(day) ? "active" : ""}
+                          aria-pressed={scenario.workingDays.includes(day)}
+                          onClick={() => toggleWorkingDay(day)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="holiday-box">
+                    <span className="mini-label">Excluded holidays</span>
+                    <div className="holiday-add">
+                      <GlassDatePicker
+                        value={holidayDraft}
+                        ariaLabel="Holiday date to exclude"
+                        onChange={setHolidayDraft}
+                        clearable
+                      />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Add holiday"
+                        disabled={!holidayDraft || scenario.holidays.includes(holidayDraft)}
+                        onClick={() => {
+                          if (!holidayDraft || scenario.holidays.includes(holidayDraft)) return;
+                          updateScenario({ holidays: [...scenario.holidays, holidayDraft].sort() });
+                          setHolidayDraft("");
+                        }}
+                      ><Plus size={16} /></button>
+                    </div>
+                    <div className="holiday-chips">
+                      {scenario.holidays.map((holiday) => (
+                        <button
+                          type="button"
+                          key={holiday}
+                          aria-label={`Remove excluded holiday ${friendlyDate(holiday)}`}
+                          onClick={() => updateScenario({ holidays: scenario.holidays.filter((item) => item !== holiday) })}
+                        >
+                          {friendlyDate(holiday)}<X size={12} />
+                        </button>
+                      ))}
+                      {!scenario.holidays.length && <small>No excluded dates</small>}
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
 
           <section className="phases-card glass-panel">
             <div className="section-heading">
-              <div><p className="eyebrow">02 • Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
+              <div><p className="eyebrow section-index-title">02 • Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
               <button className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>
             </div>
             <div className="delivery-workspace">
@@ -1434,9 +2106,9 @@ export default function Home() {
               </aside>
 
               <div className="phase-workspace">
-                <div className="phase-table">
+                <div className={"phase-table " + (planningMode ? "planning-phase-table" : "")}>
               <div className="phase-table-head">
-                <span>Phase</span><span>Schedule</span><span>Workdays</span><span>Assigned people</span><span>Hours</span><span>Cost</span><span />
+                <span>Phase</span><span>Schedule</span><span>Workdays</span><span>Assigned people</span><span>Hours</span>{!planningMode && <span>Cost</span>}<span />
               </div>
               {scenario.phases.map((phase, index) => {
                 const result = phaseResult(phase.id);
@@ -1484,7 +2156,7 @@ export default function Home() {
                       {!phase.assignments.length && <small>Drop a person here</small>}
                     </div>
                     <strong>{Math.round(result?.adjustedHours ?? 0)}h</strong>
-                    <strong>{currencyFormat(scenario.currency, result?.laborCost ?? 0)}</strong>
+                    {!planningMode && <strong>{currencyFormat(scenario.currency, result?.laborCost ?? 0)}</strong>}
                     <button className="icon-button danger" onClick={() => removePhase(phase.id)} aria-label={"Remove " + phase.name}><Trash2 size={15} /></button>
                     <div className="phase-date"><CalendarDays size={13} /> {friendlyDate(result?.start ?? "")} → {friendlyDate(result?.end ?? "")}</div>
                   </div>
@@ -1497,46 +2169,50 @@ export default function Home() {
           </section>
 
           <section className="detail-grid">
-            <article className="detail-card glass-panel">
-              <div className="section-heading compact"><div><p className="eyebrow">03 • Cost layer</p><h2>Expenses</h2></div><button className="icon-button accent" onClick={addExpense}><Plus size={17} /></button></div>
-              <div className="data-list">
-                {scenario.expenses.map((expense) => {
-                  const result = expenseResult(expense.id);
-                  return (
-                    <div className="data-row expense-row" key={expense.id}>
-                      <input className="row-name" value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
-                      <NumberStepper compact ariaLabel={expense.name + " amount"} value={expense.amount} min={0} step={1} suffix={scenario.currency} onChange={(amount) => updateExpense(expense.id, { amount })} />
-                      <GlassSelect ariaLabel={expense.name + " unit"} value={expense.unit} options={Object.entries(unitLabels).map(([value, label]) => ({ value, label }))} onChange={(unit) => updateExpense(expense.id, { unit: unit as ExpenseUnit })} />
-                      <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
-                      {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
-                      <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
-                      <button className="icon-button danger" onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
-                    </div>
-                  );
-                })}
-                {!scenario.expenses.length && <div className="empty-inline">No additional expenses</div>}
-              </div>
-            </article>
+            {!planningMode && (
+              <article className="detail-card glass-panel">
+                <div className="section-heading compact"><div><p className="eyebrow section-index-title">03 • Cost layer</p><h2>Expenses</h2></div><button className="icon-button accent" onClick={addExpense}><Plus size={17} /></button></div>
+                <div className="data-list">
+                  {scenario.expenses.map((expense) => {
+                    const result = expenseResult(expense.id);
+                    return (
+                      <div className="data-row expense-row" key={expense.id}>
+                        <input className="row-name" value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
+                        <NumberStepper compact ariaLabel={expense.name + " amount"} value={expense.amount} min={0} step={1} suffix={scenario.currency} onChange={(amount) => updateExpense(expense.id, { amount })} />
+                        <GlassSelect ariaLabel={expense.name + " unit"} value={expense.unit} options={Object.entries(unitLabels).map(([value, label]) => ({ value, label }))} onChange={(unit) => updateExpense(expense.id, { unit: unit as ExpenseUnit })} />
+                        <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
+                        {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
+                        <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
+                        <button className="icon-button danger" onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
+                      </div>
+                    );
+                  })}
+                  {!scenario.expenses.length && <div className="empty-inline">No additional expenses</div>}
+                </div>
+              </article>
+            )}
 
             <article className="detail-card glass-panel">
-              <div className="section-heading compact"><div><p className="eyebrow">04 • Adjustments</p><h2>Modifiers</h2></div><button className="icon-button accent" onClick={addModifier}><Plus size={17} /></button></div>
+              <div className="section-heading compact"><div><p className="eyebrow section-index-title">{planningMode ? "03 • Planning layer" : "04 • Adjustments"}</p><h2>{planningMode ? "Effort adjustments" : "Modifiers"}</h2></div><button className="icon-button accent" onClick={addModifier}><Plus size={17} /></button></div>
               <div className="data-list">
-                {scenario.modifiers.map((modifier) => (
+                {visibleModifiers.map((modifier) => (
                   <div className="data-row modifier-row" key={modifier.id}>
                     <input className="row-name" value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
-                    <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />
+                    {planningMode
+                      ? <span className="modifier-target-chip"><Clock3 size={13} /> Effort</span>
+                      : <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />}
                     <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
                     <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
                     <button className="icon-button danger" onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
                   </div>
                 ))}
-                {!scenario.modifiers.length && <div className="empty-inline">No price or effort modifiers</div>}
+                {!visibleModifiers.length && <div className="empty-inline">{planningMode ? "No effort adjustments" : "No price or effort modifiers"}</div>}
               </div>
             </article>
           </section>
 
-          <section className="financial-card glass-panel">
-            <div className="section-heading"><div><p className="eyebrow">05 • Decision</p><h2>Financial pulse</h2><p>The safe price uses estimated cost, the risk reserve, and your target gross margin.</p></div><span className={"safety-badge " + (calculation.quote >= calculation.safePrice ? "safe" : "unsafe")}>{calculation.quote >= calculation.safePrice ? <Check size={15} /> : <AlertTriangle size={15} />}{calculation.quote >= calculation.safePrice ? "Target protected" : "Below target"}</span></div>
+          {!planningMode && <section className="financial-card glass-panel">
+            <div className="section-heading"><div><p className="eyebrow section-index-title">05 • Decision</p><h2>Financial pulse</h2><p>The safe price uses estimated cost, the risk reserve, and your target gross margin.</p></div><span className={"safety-badge " + (calculation.quote >= calculation.safePrice ? "safe" : "unsafe")}>{calculation.quote >= calculation.safePrice ? <Check size={15} /> : <AlertTriangle size={15} />}{calculation.quote >= calculation.safePrice ? "Target protected" : "Below target"}</span></div>
             <div className="financial-layout">
               <div className="breakdown-list">
                 <div><span>Base billable amount</span><strong>{currencyFormat(scenario.currency, calculation.baseRevenue)}</strong></div>
@@ -1555,12 +2231,12 @@ export default function Home() {
                 <div className="formula-note"><LockKeyhole size={15} /><span>Internal costs never appear in Client view or its printout.</span></div>
               </div>
             </div>
-          </section>
+          </section>}
         </>
       )}
 
       {editingPerson && (
-        <Modal title={isNewPerson ? "Add someone" : "Edit profile"} subtitle="Personal and professional details stay on this device." onClose={() => setEditingPerson(null)} wide>
+        <Modal title={isNewPerson ? "Add someone" : "Edit profile"} subtitle={planningMode ? "Planning details are editable; commercial fields stay hidden." : "Personal and professional details stay on this device."} onClose={() => setEditingPerson(null)} wide>
           <form onSubmit={savePerson}>
             <div className="person-editor-top">
               <div className="editor-avatar" style={{ background: editingPerson.color }}>{initials(editingPerson.name)}</div>
@@ -1574,13 +2250,13 @@ export default function Home() {
               <label className="field"><span>Relationship</span><GlassSelect ariaLabel="Relationship" value={editingPerson.type} options={["Employee", "Intern", "Contractor", "Freelancer", "Advisor"].map((type) => ({ value: type, label: type }))} onChange={(type) => setEditingPerson({ ...editingPerson, type: type as PersonType })} /></label>
               <label className="field"><span>Role *</span><input required value={editingPerson.role} onChange={(event) => setEditingPerson({ ...editingPerson, role: event.target.value })} /></label>
               <label className="field"><span>Department</span><input value={editingPerson.department} onChange={(event) => setEditingPerson({ ...editingPerson, department: event.target.value })} /></label>
-              <MoneyInput label="Internal hourly cost" value={editingPerson.hourlyCost} onChange={(hourlyCost) => setEditingPerson({ ...editingPerson, hourlyCost })} suffix={scenario.currency + "/h"} min={0} />
+              {!planningMode && <MoneyInput label="Internal hourly cost" value={editingPerson.hourlyCost} onChange={(hourlyCost) => setEditingPerson({ ...editingPerson, hourlyCost })} suffix={scenario.currency + "/h"} min={0} />}
               <MoneyInput label="Default hours / day" value={editingPerson.defaultHours} onChange={(defaultHours) => setEditingPerson({ ...editingPerson, defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
               <label className="field"><span>Email</span><input type="email" value={editingPerson.email} onChange={(event) => setEditingPerson({ ...editingPerson, email: event.target.value })} /></label>
               <label className="field"><span>Phone</span><input value={editingPerson.phone} onChange={(event) => setEditingPerson({ ...editingPerson, phone: event.target.value })} /></label>
               <label className="field"><span>Location</span><input value={editingPerson.location} onChange={(event) => setEditingPerson({ ...editingPerson, location: event.target.value })} /></label>
               <label className="field"><span>Skills</span><input placeholder="Comma-separated" value={editingPerson.skills} onChange={(event) => setEditingPerson({ ...editingPerson, skills: event.target.value })} /></label>
-              <label className="field full"><span>Internal notes</span><textarea rows={3} value={editingPerson.notes} onChange={(event) => setEditingPerson({ ...editingPerson, notes: event.target.value })} /></label>
+              {!planningMode && <label className="field full"><span>Internal notes</span><textarea rows={3} value={editingPerson.notes} onChange={(event) => setEditingPerson({ ...editingPerson, notes: event.target.value })} /></label>}
             </div>
             <div className="modal-actions">
               {!isNewPerson && <button type="button" className="button danger-button" onClick={deletePerson}><Trash2 size={15} /> Remove person</button>}
@@ -1611,26 +2287,39 @@ export default function Home() {
         </Modal>
       )}
 
-      {backupOpen && (
-        <Modal title="Export workspace" subtitle="Encrypted export protects rates, costs, profiles and project history." onClose={() => setBackupOpen(false)}>
-          <div className="backup-options">
-            <div className="secure-export"><div className="backup-icon"><LockKeyhole size={22} /></div><div><strong>Encrypted backup</strong><span>Recommended for confidential pricing data.</span></div></div>
-            <label className="field"><span>Backup password</span><input type="password" value={backupPassword} onChange={(event) => setBackupPassword(event.target.value)} placeholder="At least 8 characters" /></label>
-            <button className="button primary full-button" onClick={exportEncrypted}><FileDown size={16} /> Download encrypted file</button>
-            <div className="backup-divider"><span>or</span></div>
-            <button className="button secondary full-button" onClick={exportPlain}><ArrowDownToLine size={16} /> Export plain JSON</button>
-            <p className="plain-warning"><AlertTriangle size={14} /> Plain JSON can be read by anyone who receives the file.</p>
+      {revealPricingOpen && (
+        <Modal title="Reveal pricing?" subtitle="Use this only when the private pricing discussion is ready." onClose={() => setRevealPricingOpen(false)}>
+          <div className="reveal-pricing">
+            <div className="reveal-pricing-message">
+              <span><Eye size={20} /></span>
+              <div><strong>Commercial details will become visible everywhere.</strong><p>This includes rates, costs, expenses, margins, quotes and internal financial notes.</p></div>
+            </div>
+            <div className="modal-actions">
+              <span />
+              <button type="button" className="button secondary" onClick={() => setRevealPricingOpen(false)}>Keep hidden</button>
+              <button type="button" className="button primary" onClick={revealPricing}><Eye size={16} /> Reveal pricing</button>
+            </div>
           </div>
         </Modal>
       )}
 
-      {pendingImport && (
-        <Modal title="Unlock encrypted backup" subtitle="Enter the password used when this workspace was exported." onClose={() => setPendingImport(null)}>
-          <div className="backup-options"><label className="field"><span>Backup password</span><input autoFocus type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") unlockImport(); }} /></label><button className="button primary full-button" onClick={unlockImport}><LockKeyhole size={16} /> Unlock and import</button></div>
+      {exportOpen && (
+        <Modal title="Export project" subtitle="Choose how you want to share or save this project." onClose={() => setExportOpen(false)}>
+          <div className="export-options">
+            <button className="export-choice" onClick={printClientEstimate}>
+              <span className="export-choice-icon"><Printer size={21} /></span>
+              <span><strong>{planningMode ? "Print planning brief" : "Print client estimate"}</strong><small>{planningMode ? "Prints the schedule, phases, effort and team with pricing omitted." : "Opens the clean client view and print dialog."}</small></span>
+            </button>
+            {!planningMode && <button className="export-choice" onClick={downloadProject}>
+              <span className="export-choice-icon"><FileDown size={21} /></span>
+              <span><strong>Download project JSON</strong><small>Saves an editable backup you can import later.</small></span>
+            </button>}
+            <p className="export-note">{planningMode ? <EyeOff size={15} /> : <Info size={15} />} {planningMode ? "Pricing stays excluded from this printout. Turn off Planning mode for the complete project backup." : "The JSON file includes internal pricing and people data."}</p>
+          </div>
         </Modal>
       )}
 
-      {toast && <div className="toast"><Check size={16} />{toast}</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><Check size={16} />{toast}</div>}
     </main>
   );
 }

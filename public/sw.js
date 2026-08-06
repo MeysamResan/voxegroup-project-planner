@@ -1,4 +1,4 @@
-const CACHE_NAME = "voxe-pricing-studio-v1";
+const CACHE_NAME = "voxe-pricing-studio-v7";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {

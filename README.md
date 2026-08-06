@@ -6,8 +6,8 @@ Private, offline-first project pricing and delivery planning for Voxe Group.
 
 - All projects, rates, people and calculations remain in the browser on the current device.
 - The app has no project database, analytics, telemetry or pricing API.
-- Encrypted exports use PBKDF2-SHA256 with 250,000 iterations and AES-256-GCM.
-- Plain JSON export is available only when an unencrypted editable backup is intentionally needed.
+- Project exports use editable JSON so they can be imported again later.
+- Exported files include internal rates, people and pricing data, so store and share them carefully.
 - Client view and its printout omit internal costs, wages, profit and margin.
 
 ## Run locally
@@ -36,4 +36,4 @@ The calculator does not require environment variables, D1, R2, authentication, a
 
 ## Important backup rule
 
-Browser data belongs to one browser profile on one device. Export an encrypted backup regularly. There is no password recovery because the password and decryption key are never stored or transmitted.
+Browser data belongs to one browser profile on one device. Export a project JSON backup regularly and keep it in a secure location.

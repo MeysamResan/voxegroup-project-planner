@@ -4,12 +4,12 @@ import test from "node:test";
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
-test("renders development preview metadata", async () => {
+async function renderPage() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${Math.random()}`);
   const { default: worker } = await import(workerUrl.href);
 
-  const response = await worker.fetch(
+  return worker.fetch(
     new Request("http://localhost/", {
       headers: { accept: "text/html" },
     }),
@@ -23,6 +23,10 @@ test("renders development preview metadata", async () => {
       passThroughOnException() {},
     },
   );
+}
+
+test("renders development preview metadata", async () => {
+  const response = await renderPage();
 
   assert.equal(response.status, 200);
   assert.match(
@@ -30,4 +34,22 @@ test("renders development preview metadata", async () => {
     /^text\/html\b/i,
   );
   assert.match(await response.text(), developmentPreviewMeta);
+});
+
+test("starts with pricing omitted from the fail-closed planning render", async () => {
+  const response = await renderPage();
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /VOXE/i);
+  assert.match(html, /Planning mode/i);
+  assert.match(html, /\bImport\b/i);
+  assert.match(html, /Pricing controls hidden/i);
+  assert.match(html, /aria-label="Project start date"[^>]*aria-haspopup="dialog"/i);
+  assert.doesNotMatch(html, /type="date"/i);
+  assert.doesNotMatch(html, /Local only|Saved on this device|>\s*(?:Pricing|Planning) Studio\s*</i);
+  assert.doesNotMatch(
+    html,
+    /Client quote|Estimated cost|Gross profit|Financial pulse|Estimated investment|Internal hourly cost|Cloud development environment|AI sandbox usage|AI integration complexity/i,
+  );
 });
