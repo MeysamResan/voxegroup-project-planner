@@ -228,6 +228,50 @@ test("project settings controls use one standard shared size", async () => {
   );
 });
 
+test("the live backdrop keeps its effects inside a bounded GPU budget", async () => {
+  const [backdropSource, globalStyles, primitiveStyles] = await Promise.all([
+    readFile(new URL("../components/app/AppBackdrop.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(backdropSource, /const ACTIVE_FRAME_RATE = 30/);
+  assert.match(backdropSource, /const IDLE_FRAME_RATE = 24/);
+  assert.match(backdropSource, /const OBSCURED_FRAME_RATE = 12/);
+  assert.match(backdropSource, /const MAX_CANVAS_PIXELS = 2_400_000/);
+  assert.match(backdropSource, /Math\.min\(devicePixelRatio, pixelBudgetRatio\)/);
+  assert.match(backdropSource, /Math\.min\(72, Math\.max\(38,/);
+  assert.match(backdropSource, /const MAX_PARTICLE_CONNECTIONS = 2/);
+  assert.match(backdropSource, /const PARTICLE_GRID_SIZE = 158/);
+  assert.match(backdropSource, /new Int16Array\(particleCount\)/);
+  assert.match(backdropSource, /createCometSprite\(color, length, thickness\)/);
+  assert.match(backdropSource, /window\.addEventListener\("scroll", handleScroll/);
+  assert.doesNotMatch(backdropSource, /shadowBlur/);
+  assert.doesNotMatch(backdropSource, /RandomAmbientGlows/);
+  assert.doesNotMatch(backdropSource, /new Map|new Set/);
+
+  const canvasRule = globalStyles.match(/\.live-background-canvas\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(canvasRule, /filter:\s*none/);
+  assert.match(canvasRule, /mix-blend-mode:\s*normal/);
+  assert.doesNotMatch(globalStyles, /\.ambient(?:-[\w-]+)?\s*{/);
+
+  const spectrumRule = globalStyles.match(/\.animated-backdrop::before\s*{[^}]*}/)?.[0] ?? "";
+  assert.doesNotMatch(spectrumRule, /filter:|animation:|will-change:/);
+
+  const glowRule = globalStyles.match(/\.backdrop-glow\s*{[^}]*}/)?.[0] ?? "";
+  const glowPseudoRule = globalStyles.match(/\.backdrop-glow::before,[\s\S]*?\.backdrop-glow::after\s*{[^}]*}/)?.[0] ?? "";
+  assert.doesNotMatch(glowRule, /animation:/);
+  assert.doesNotMatch(glowPseudoRule, /animation:/);
+  assert.doesNotMatch(globalStyles, /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm);
+  assert.doesNotMatch(primitiveStyles, /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm);
+
+  const clientSheetRule = globalStyles.match(/\.client-sheet\.glass-panel\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(clientSheetRule, /backdrop-filter:\s*none/);
+
+  const sectionCardRule = primitiveStyles.match(/\.ui-section-card\.glass-panel\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(sectionCardRule, /backdrop-filter:\s*none/);
+});
+
 test("core pricing features compose the shared UI primitives", async () => {
   const contracts = [
     ["../features/pricing/PricingStudio.tsx", ["Toast"]],

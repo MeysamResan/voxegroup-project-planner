@@ -16,8 +16,8 @@
   --green: #58dab9;
   --orange: #f2a45f;
   --red: #ff6d86;
-  --glass-background: linear-gradient(145deg, rgba(39, 29, 61, 0.55), rgba(14, 10, 25, 0.48));
-  --glass-shadow: 0 24px 70px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --glass-background: linear-gradient(145deg, rgba(39, 29, 61, 0.84), rgba(14, 10, 25, 0.78));
+  --glass-shadow: 0 14px 36px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   --font-ui: var(--font-geist-sans), "Segoe UI", Arial, sans-serif;
   --text-micro: 0.75rem;
   --text-caption: 0.8125rem;
@@ -117,6 +117,8 @@ textarea:focus-visible {
   position: fixed;
   z-index: -1;
   inset: 0;
+  contain: strict;
+  isolation: isolate;
   overflow: hidden;
   pointer-events: none;
   background:
@@ -135,36 +137,24 @@ textarea:focus-visible {
 .animated-backdrop::before {
   position: absolute;
   z-index: 1;
-  inset: -38%;
-  background: conic-gradient(
-    from 40deg,
-    transparent 0 12%,
-    rgba(132, 92, 243, 0.14) 23%,
-    transparent 35% 45%,
-    rgba(49, 205, 190, 0.1) 57%,
-    transparent 69% 78%,
-    rgba(220, 76, 204, 0.11) 89%,
-    transparent 100%
-  );
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 24%, rgba(132, 92, 243, 0.1), transparent 32%),
+    radial-gradient(circle at 79% 30%, rgba(49, 205, 190, 0.075), transparent 30%),
+    radial-gradient(circle at 58% 82%, rgba(220, 76, 204, 0.075), transparent 34%);
   content: "";
-  filter: blur(75px);
-  opacity: 0.55;
-  animation: spectrum-sweep 12s linear infinite;
-  will-change: transform;
 }
 
 .backdrop-grid {
   position: absolute;
   z-index: 0;
-  inset: -72px;
-  opacity: 0.18;
+  inset: 0;
+  opacity: 0.14;
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: 72px 72px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 88%);
-  animation: grid-drift 14s linear infinite;
-  will-change: transform;
 }
 
 .live-background-canvas {
@@ -174,51 +164,9 @@ textarea:focus-visible {
   display: block;
   width: 100%;
   height: 100%;
-  opacity: 0.9;
-  filter: saturate(125%);
-  mix-blend-mode: screen;
-}
-
-.ambient {
-  position: absolute;
-  z-index: 1;
-  top: -19rem;
-  left: -19rem;
-  width: 38rem;
-  height: 38rem;
-  border-radius: 999px;
-  filter: blur(100px);
-  opacity: 0.28;
-  will-change: transform;
-  pointer-events: none;
-}
-
-.ambient-one {
-  background: radial-gradient(circle, #8157ff 0%, #6532d2 42%, transparent 72%);
-}
-
-.ambient-two {
-  width: 34rem;
-  height: 34rem;
-  background: radial-gradient(circle, #f054d6 0%, #9b2bc8 40%, transparent 72%);
-}
-
-.ambient-three {
-  width: 36rem;
-  height: 36rem;
-  background: radial-gradient(circle, #23cdbb 0%, #2569b8 38%, transparent 72%);
-}
-
-.ambient-four {
-  width: 31rem;
-  height: 31rem;
-  background: radial-gradient(circle, #429cff 0%, #4e3ed0 40%, transparent 72%);
-}
-
-.ambient-five {
-  width: 29rem;
-  height: 29rem;
-  background: radial-gradient(circle, #d96aff 0%, #813bd1 40%, transparent 72%);
+  opacity: 0.88;
+  filter: none;
+  mix-blend-mode: normal;
 }
 
 .backdrop-glow {
@@ -230,8 +178,7 @@ textarea:focus-visible {
   height: 20rem;
   border: 1px solid rgba(183, 158, 255, 0.24);
   border-radius: 38% 62% 63% 37% / 42% 44% 56% 58%;
-  box-shadow: 0 0 100px rgba(126, 91, 236, 0.12), inset 0 0 70px rgba(79, 211, 194, 0.06);
-  animation: slow-spin 13s linear infinite;
+  box-shadow: 0 0 56px rgba(126, 91, 236, 0.1), inset 0 0 42px rgba(79, 211, 194, 0.05);
 }
 
 .backdrop-glow::before,
@@ -240,42 +187,33 @@ textarea:focus-visible {
   border: 1px solid rgba(175, 146, 255, 0.17);
   border-radius: 46% 54% 37% 63% / 57% 38% 62% 43%;
   content: "";
-  animation: orbit-pulse 3.6s ease-in-out infinite alternate;
 }
 
 .backdrop-glow::before {
   inset: -34%;
+  opacity: 0.52;
+  transform: rotate(-8deg) scale(0.96);
 }
 
 .backdrop-glow::after {
   inset: -72%;
   border-color: rgba(62, 216, 199, 0.12);
-  animation-delay: -3s;
-}
-
-@keyframes slow-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes grid-drift {
-  to { transform: translate3d(72px, 72px, 0); }
-}
-
-@keyframes spectrum-sweep {
-  to { transform: rotate(360deg) scale(1.08); }
-}
-
-@keyframes orbit-pulse {
-  from { opacity: 0.32; transform: rotate(-8deg) scale(0.92); }
-  to { opacity: 0.85; transform: rotate(12deg) scale(1.08); }
+  opacity: 0.4;
+  transform: rotate(12deg) scale(1.04);
 }
 
 .glass-panel {
   border: 1px solid var(--line);
   background: var(--glass-background);
   box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(26px) saturate(155%);
-  -webkit-backdrop-filter: blur(26px) saturate(155%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.metric-card.glass-panel {
+  background: linear-gradient(145deg, rgba(44, 33, 68, 0.78), rgba(15, 11, 26, 0.73));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .topbar {
@@ -1308,10 +1246,10 @@ textarea:focus-visible {
   overflow-y: auto;
   border: 1px solid rgba(196, 174, 255, 0.24);
   border-radius: 15px;
-  background: linear-gradient(145deg, rgba(35, 26, 55, 0.86), rgba(12, 8, 22, 0.82));
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(28px) saturate(170%);
-  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  background: linear-gradient(145deg, rgba(35, 26, 55, 0.96), rgba(12, 8, 22, 0.95));
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: menu-enter 130ms ease-out;
 }
 
@@ -1360,10 +1298,10 @@ textarea:focus-visible {
   border-radius: 18px;
   background:
     radial-gradient(circle at 88% 4%, rgba(120, 82, 220, 0.17), transparent 34%),
-    linear-gradient(145deg, rgba(37, 27, 58, 0.9), rgba(11, 7, 21, 0.88));
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.13);
-  backdrop-filter: blur(30px) saturate(175%);
-  -webkit-backdrop-filter: blur(30px) saturate(175%);
+    linear-gradient(145deg, rgba(37, 27, 58, 0.97), rgba(11, 7, 21, 0.96));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: menu-enter 150ms ease-out;
 }
 
@@ -1714,9 +1652,10 @@ input[type="number"] {
   overflow-y: auto;
   border: 1px solid rgba(190, 166, 255, 0.17);
   border-radius: 18px;
-  background: linear-gradient(155deg, rgba(68, 48, 101, 0.28), rgba(8, 5, 16, 0.3));
+  background: linear-gradient(155deg, rgba(68, 48, 101, 0.78), rgba(8, 5, 16, 0.82));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px) saturate(145%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .people-sidebar .dock-heading h3 {
@@ -2721,8 +2660,9 @@ input[type="number"] {
   display: grid;
   padding: 24px;
   place-items: center;
-  background: rgba(4, 2, 8, 0.74);
-  backdrop-filter: blur(10px);
+  background: rgba(4, 2, 8, 0.82);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .modal {
@@ -2933,6 +2873,14 @@ input[type="number"] {
   margin: 22px auto 0;
   padding: 38px;
   border-radius: 28px;
+}
+
+.client-sheet.glass-panel {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(151, 117, 236, 0.09), transparent 30%),
+    linear-gradient(145deg, rgba(42, 32, 65, 0.84), rgba(14, 10, 25, 0.79));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .client-hero {
@@ -3412,7 +3360,6 @@ input[type="number"] {
 
 @media (prefers-reduced-motion: reduce) {
   .animated-backdrop::before,
-  .ambient,
   .backdrop-grid,
   .backdrop-glow,
   .backdrop-glow::before,

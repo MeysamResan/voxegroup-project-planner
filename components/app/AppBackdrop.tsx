@@ -2,73 +2,342 @@
 
 import { useEffect, useRef } from "react";
 
+const ACTIVE_FRAME_RATE = 30;
+const IDLE_FRAME_RATE = 24;
+const OBSCURED_FRAME_RATE = 12;
+const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_FRAME_RATE;
+const IDLE_FRAME_INTERVAL = 1000 / IDLE_FRAME_RATE;
+const OBSCURED_FRAME_INTERVAL = 1000 / OBSCURED_FRAME_RATE;
+const BASE_FRAME_INTERVAL = 1000 / 60;
+const MAX_DELTA_SCALE = 5;
+const FRAME_TOLERANCE = 1;
+const FRAME_WAKE_AHEAD = 4;
+const ACTIVE_WINDOW = 900;
+const MAX_CANVAS_PIXELS = 2_400_000;
+const MAX_PARTICLE_CONNECTIONS = 2;
+const PARTICLE_GRID_SIZE = 158;
+const CONNECTION_ALPHA_LEVELS = [0.012, 0.034, 0.056, 0.078, 0.1, 0.122];
+
+type Particle = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  phase: number;
+  sprite: HTMLCanvasElement;
+};
+
+type Comet = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  length: number;
+  thickness: number;
+  color: string;
+  angle: number;
+  headOffset: number;
+  sprite: HTMLCanvasElement;
+};
+
+type AmbientGlow = {
+  x: number;
+  y: number;
+  scale: number;
+  opacity: number;
+  fromX: number;
+  fromY: number;
+  fromScale: number;
+  fromOpacity: number;
+  targetX: number;
+  targetY: number;
+  targetScale: number;
+  targetOpacity: number;
+  elapsed: number;
+  duration: number;
+  radius: number;
+  sprite: HTMLCanvasElement;
+};
+
+const createRadialSprite = (color: string, size: number, coreOpacity: number) => {
+  const sprite = document.createElement("canvas");
+  sprite.width = size;
+  sprite.height = size;
+  const spriteContext = sprite.getContext("2d");
+  if (!spriteContext) return sprite;
+
+  const center = size / 2;
+  const gradient = spriteContext.createRadialGradient(center, center, 0, center, center, center);
+  gradient.addColorStop(0, `rgba(${color}, ${coreOpacity})`);
+  gradient.addColorStop(0.24, `rgba(${color}, ${coreOpacity * 0.62})`);
+  gradient.addColorStop(0.58, `rgba(${color}, ${coreOpacity * 0.2})`);
+  gradient.addColorStop(1, `rgba(${color}, 0)`);
+  spriteContext.fillStyle = gradient;
+  spriteContext.fillRect(0, 0, size, size);
+  return sprite;
+};
+
+const createParticleSprite = (color: string, radius: number, backingScale: number) => {
+  const size = 48;
+  const sprite = createRadialSprite(color, size, 0.66);
+  const spriteContext = sprite.getContext("2d");
+  if (!spriteContext) return sprite;
+
+  const haloRadius = 9 + radius * 4.5;
+  const visibleRadius = Math.max(radius, 0.82 / Math.max(0.1, backingScale));
+  const coreRadius = visibleRadius * (size / 2) / haloRadius;
+  spriteContext.beginPath();
+  spriteContext.arc(size / 2, size / 2, coreRadius, 0, Math.PI * 2);
+  spriteContext.fillStyle = `rgba(${color}, 0.76)`;
+  spriteContext.fill();
+  return sprite;
+};
+
+const createCometSprite = (color: string, length: number, thickness: number) => {
+  const padding = 7;
+  const sprite = document.createElement("canvas");
+  sprite.width = Math.ceil(length + padding * 2);
+  sprite.height = Math.max(14, Math.ceil(thickness * 7 + padding * 2));
+  const spriteContext = sprite.getContext("2d");
+  if (!spriteContext) return { sprite, headOffset: length + padding };
+
+  const centerY = sprite.height / 2;
+  const headX = sprite.width - padding;
+  const trail = spriteContext.createLinearGradient(padding, centerY, headX, centerY);
+  trail.addColorStop(0, `rgba(${color}, 0)`);
+  trail.addColorStop(0.72, `rgba(${color}, 0.11)`);
+  trail.addColorStop(1, `rgba(${color}, 0.68)`);
+  spriteContext.beginPath();
+  spriteContext.moveTo(padding, centerY);
+  spriteContext.lineTo(headX, centerY);
+  spriteContext.strokeStyle = trail;
+  spriteContext.lineCap = "round";
+  spriteContext.globalAlpha = 0.3;
+  spriteContext.lineWidth = thickness * 5;
+  spriteContext.stroke();
+  spriteContext.globalAlpha = 1;
+  spriteContext.lineWidth = thickness;
+  spriteContext.stroke();
+  spriteContext.beginPath();
+  spriteContext.arc(headX, centerY, thickness * 1.5, 0, Math.PI * 2);
+  spriteContext.fillStyle = `rgba(${color}, 0.78)`;
+  spriteContext.fill();
+  return { sprite, headOffset: headX };
+};
+
+const easeInOut = (progress: number) =>
+  progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - ((-2 * progress + 2) * (-2 * progress + 2) * (-2 * progress + 2)) / 2;
+
 function LiveBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
+    const context = canvas?.getContext("2d", { alpha: true });
     if (!canvas || !context) return;
 
     const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
     const colors = ["157, 126, 255", "61, 218, 199", "226, 91, 210"];
+    const glowColors = [
+      "129, 87, 255",
+      "240, 84, 214",
+      "35, 205, 187",
+      "66, 156, 255",
+      "217, 106, 255",
+    ];
+    const glowSprites = glowColors.map((color) => createRadialSprite(color, 192, 0.82));
+    const pointerSprite = createRadialSprite("130, 112, 255", 160, 0.3);
+
     let width = window.innerWidth;
     let height = window.innerHeight;
     let animationFrame = 0;
+    let frameTimer = 0;
+    let resizeTimer = 0;
+    let scrollResumeTimer = 0;
+    let lastDrawTime = 0;
+    let lastRenderTime = 0;
+    let sceneTime = 0;
+    let activeUntil = window.performance.now() + ACTIVE_WINDOW;
+    let backingScale = 1;
     let reducedMotion = motionPreference.matches;
+    let isPrinting = false;
+    let isScrolling = false;
+    let windowFocused = document.hasFocus();
     let pointerX = -1000;
     let pointerY = -1000;
-    let particles: Array<{
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      radius: number;
-      color: string;
-      phase: number;
-    }> = [];
-    let comets: Array<{
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      length: number;
-      thickness: number;
-      color: string;
-    }> = [];
+    let particles: Particle[] = [];
+    let comets: Comet[] = [];
+    let ambientGlows: AmbientGlow[] = [];
+    let ribbonGradients: CanvasGradient[] = [];
+    let gridColumns = 1;
+    let gridRows = 1;
+    let gridHead = new Int16Array(1);
+    let gridNext = new Int16Array(1);
+    let edgeFlags = new Uint8Array(1);
+    let connectionFrom = new Int16Array(1);
+    let connectionTo = new Int16Array(1);
+    let connectionAlphaBin = new Uint8Array(1);
 
-    const createParticles = () => {
-      const count = Math.min(88, Math.max(38, Math.floor((width * height) / 22000)));
-      particles = Array.from({ length: count }, (_, index) => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: (Math.random() - 0.5) * 0.44,
-        vy: (Math.random() - 0.5) * 0.38,
-        radius: 0.8 + Math.random() * 1.7,
-        color: colors[index % colors.length],
-        phase: Math.random() * Math.PI * 2,
-      }));
-      comets = Array.from({ length: 4 }, (_, index) => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: 1.05 + Math.random() * 1.1,
-        vy: (Math.random() - 0.5) * 0.5,
-        length: 75 + Math.random() * 105,
-        thickness: 0.7 + Math.random() * 0.8,
-        color: colors[index % colors.length],
-      }));
+    const randomGlowX = () => -width * 0.06 + Math.random() * width * 1.12;
+    const randomGlowY = () => -height * 0.08 + Math.random() * height * 1.16;
+
+    const setGlowTarget = (glow: AmbientGlow) => {
+      glow.fromX = glow.x;
+      glow.fromY = glow.y;
+      glow.fromScale = glow.scale;
+      glow.fromOpacity = glow.opacity;
+
+      let targetX = randomGlowX();
+      let targetY = randomGlowY();
+      const minimumDistanceSquared = Math.pow(Math.min(width, height) * 0.24, 2);
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const distanceX = targetX - glow.x;
+        const distanceY = targetY - glow.y;
+        if (distanceX * distanceX + distanceY * distanceY >= minimumDistanceSquared) break;
+        targetX = randomGlowX();
+        targetY = randomGlowY();
+      }
+
+      glow.targetX = targetX;
+      glow.targetY = targetY;
+      glow.targetScale = 0.82 + Math.random() * 0.38;
+      glow.targetOpacity = 0.16 + Math.random() * 0.1;
+      glow.elapsed = 0;
+      glow.duration = 2400 + Math.random() * 3400;
+    };
+
+    const createScene = () => {
+      const particleCount = Math.min(72, Math.max(38, Math.floor((width * height) / 30000)));
+      particles = Array.from({ length: particleCount }, (_, index) => {
+        const radius = 0.8 + Math.random() * 1.7;
+        const color = colors[index % colors.length];
+        return {
+          id: index,
+          x: Math.random() * width,
+          y: Math.random() * height,
+          vx: (Math.random() - 0.5) * 0.44,
+          vy: (Math.random() - 0.5) * 0.38,
+          radius,
+          color,
+          phase: Math.random() * Math.PI * 2,
+          sprite: createParticleSprite(color, radius, backingScale),
+        };
+      });
+
+      comets = Array.from({ length: 3 }, (_, index) => {
+        const vx = 1.05 + Math.random() * 1.1;
+        const vy = (Math.random() - 0.5) * 0.5;
+        const length = 75 + Math.random() * 105;
+        const thickness = 0.7 + Math.random() * 0.8;
+        const color = colors[index % colors.length];
+        const cometSprite = createCometSprite(color, length, thickness);
+        return {
+          x: Math.random() * width,
+          y: Math.random() * height,
+          vx,
+          vy,
+          length,
+          thickness,
+          color,
+          angle: Math.atan2(vy, vx),
+          headOffset: cometSprite.headOffset,
+          sprite: cometSprite.sprite,
+        };
+      });
+
+      const sceneSize = Math.min(width, height);
+      ambientGlows = glowSprites.map((sprite, index) => {
+        const x = randomGlowX();
+        const y = randomGlowY();
+        const glow: AmbientGlow = {
+          x,
+          y,
+          scale: 0.86 + Math.random() * 0.3,
+          opacity: 0.17 + Math.random() * 0.08,
+          fromX: x,
+          fromY: y,
+          fromScale: 1,
+          fromOpacity: 0.2,
+          targetX: x,
+          targetY: y,
+          targetScale: 1,
+          targetOpacity: 0.2,
+          elapsed: 0,
+          duration: 3000,
+          radius: Math.min(390, Math.max(245, sceneSize * (0.25 + index * 0.018))),
+          sprite,
+        };
+        setGlowTarget(glow);
+        return glow;
+      });
+
+      gridColumns = Math.max(1, Math.ceil(width / PARTICLE_GRID_SIZE));
+      gridRows = Math.max(1, Math.ceil(height / PARTICLE_GRID_SIZE));
+      gridHead = new Int16Array(gridColumns * gridRows);
+      gridNext = new Int16Array(particleCount);
+      edgeFlags = new Uint8Array(particleCount * particleCount);
+      connectionFrom = new Int16Array(particleCount * MAX_PARTICLE_CONNECTIONS);
+      connectionTo = new Int16Array(particleCount * MAX_PARTICLE_CONNECTIONS);
+      connectionAlphaBin = new Uint8Array(particleCount * MAX_PARTICLE_CONNECTIONS);
+    };
+
+    const createRibbonGradients = () => {
+      ribbonGradients = colors.map((color) => {
+        const gradient = context.createLinearGradient(0, 0, width, 0);
+        gradient.addColorStop(0, `rgba(${color}, 0)`);
+        gradient.addColorStop(0.22, `rgba(${color}, 0.07)`);
+        gradient.addColorStop(0.55, `rgba(${color}, 0.17)`);
+        gradient.addColorStop(0.82, `rgba(${color}, 0.065)`);
+        gradient.addColorStop(1, `rgba(${color}, 0)`);
+        return gradient;
+      });
     };
 
     const resize = () => {
       width = window.innerWidth;
       height = window.innerHeight;
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.6);
+
+      // Cap both density and total backing-store area. Abstract light and particles
+      // tolerate modest upscaling, while 4K and ultrawide displays stay predictable.
+      const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1);
+      const pixelBudgetRatio = Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, width * height));
+      const pixelRatio = Math.min(devicePixelRatio, pixelBudgetRatio);
+      backingScale = pixelRatio;
       canvas.width = Math.floor(width * pixelRatio);
       canvas.height = Math.floor(height * pixelRatio);
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      createParticles();
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "low";
+      createRibbonGradients();
+      createScene();
+    };
+
+    const drawAmbientGlows = (deltaMilliseconds: number) => {
+      for (let index = 0; index < ambientGlows.length; index += 1) {
+        const glow = ambientGlows[index];
+        if (!reducedMotion) {
+          glow.elapsed += deltaMilliseconds;
+          const progress = Math.min(1, glow.elapsed / glow.duration);
+          const easedProgress = easeInOut(progress);
+          glow.x = glow.fromX + (glow.targetX - glow.fromX) * easedProgress;
+          glow.y = glow.fromY + (glow.targetY - glow.fromY) * easedProgress;
+          glow.scale = glow.fromScale + (glow.targetScale - glow.fromScale) * easedProgress;
+          glow.opacity = glow.fromOpacity + (glow.targetOpacity - glow.fromOpacity) * easedProgress;
+          if (progress >= 1) setGlowTarget(glow);
+        }
+
+        const radius = glow.radius * glow.scale;
+        context.globalAlpha = glow.opacity;
+        context.drawImage(glow.sprite, glow.x - radius, glow.y - radius, radius * 2, radius * 2);
+      }
+      context.globalAlpha = 1;
     };
 
     const drawRibbon = (
@@ -76,93 +345,78 @@ function LiveBackground() {
       baseY: number,
       amplitude: number,
       speed: number,
-      color: string,
+      gradient: CanvasGradient,
       offset: number,
     ) => {
-      const gradient = context.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, "rgba(" + color + ", 0)");
-      gradient.addColorStop(0.22, "rgba(" + color + ", 0.08)");
-      gradient.addColorStop(0.55, "rgba(" + color + ", 0.18)");
-      gradient.addColorStop(0.82, "rgba(" + color + ", 0.07)");
-      gradient.addColorStop(1, "rgba(" + color + ", 0)");
-
       context.beginPath();
-      for (let x = -40; x <= width + 40; x += 24) {
+      const pathStep = 30 / Math.max(0.5, backingScale);
+      for (let x = -40; x <= width + 40; x += pathStep) {
         const y = baseY
           + Math.sin(x * 0.0045 + time * speed + offset) * amplitude
           + Math.sin(x * 0.009 - time * speed * 0.7 + offset) * amplitude * 0.34;
         if (x === -40) context.moveTo(x, y);
         else context.lineTo(x, y);
       }
+
+      const ribbonWidth = Math.max(26, Math.min(54, width * 0.033));
       context.strokeStyle = gradient;
-      context.lineWidth = Math.max(28, Math.min(58, width * 0.035));
-      context.shadowBlur = 42;
-      context.shadowColor = "rgba(" + color + ", 0.2)";
+      context.lineCap = "round";
+      context.globalAlpha = 0.34;
+      context.lineWidth = ribbonWidth * 1.55;
       context.stroke();
-      context.shadowBlur = 0;
+      context.globalAlpha = 0.88;
+      context.lineWidth = ribbonWidth * 0.62;
+      context.stroke();
+      context.globalAlpha = 1;
     };
 
-    const draw = (timestamp: number) => {
-      const time = timestamp * 0.001;
-      context.clearRect(0, 0, width, height);
-      context.globalCompositeOperation = "screen";
-
-      drawRibbon(time, height * 0.24, height * 0.065, 0.34, colors[0], 0.4);
-      drawRibbon(time, height * 0.58, height * 0.085, -0.28, colors[1], 2.1);
-      drawRibbon(time, height * 0.83, height * 0.055, 0.25, colors[2], 4.2);
-
-      if (pointerX > -500) {
-        const pointerGlow = context.createRadialGradient(pointerX, pointerY, 0, pointerX, pointerY, 145);
-        pointerGlow.addColorStop(0, "rgba(149, 119, 255, 0.07)");
-        pointerGlow.addColorStop(0.5, "rgba(65, 214, 198, 0.025)");
-        pointerGlow.addColorStop(1, "rgba(65, 214, 198, 0)");
-        context.beginPath();
-        context.arc(pointerX, pointerY, 145, 0, Math.PI * 2);
-        context.fillStyle = pointerGlow;
-        context.fill();
-      }
-
-      comets.forEach((comet) => {
+    const drawComets = (deltaScale: number) => {
+      for (let index = 0; index < comets.length; index += 1) {
+        const comet = comets[index];
         if (!reducedMotion) {
-          comet.x += comet.vx;
-          comet.y += comet.vy;
+          comet.x += comet.vx * deltaScale;
+          comet.y += comet.vy * deltaScale;
           if (comet.x - comet.length > width || comet.y < -80 || comet.y > height + 80) {
             comet.x = -comet.length - Math.random() * width * 0.3;
             comet.y = Math.random() * height;
             comet.vx = 1.05 + Math.random() * 1.1;
             comet.vy = (Math.random() - 0.5) * 0.5;
+            comet.angle = Math.atan2(comet.vy, comet.vx);
           }
         }
 
-        const tailX = comet.x - comet.vx * comet.length;
-        const tailY = comet.y - comet.vy * comet.length;
-        const trail = context.createLinearGradient(tailX, tailY, comet.x, comet.y);
-        trail.addColorStop(0, "rgba(" + comet.color + ", 0)");
-        trail.addColorStop(0.72, "rgba(" + comet.color + ", 0.12)");
-        trail.addColorStop(1, "rgba(" + comet.color + ", 0.68)");
-        context.beginPath();
-        context.moveTo(tailX, tailY);
-        context.lineTo(comet.x, comet.y);
-        context.strokeStyle = trail;
-        context.lineWidth = comet.thickness;
-        context.shadowBlur = 12;
-        context.shadowColor = "rgba(" + comet.color + ", 0.45)";
-        context.stroke();
-        context.shadowBlur = 0;
-      });
+        context.save();
+        context.translate(comet.x, comet.y);
+        context.rotate(comet.angle);
+        context.drawImage(comet.sprite, -comet.headOffset, -comet.sprite.height / 2);
+        context.restore();
+      }
+    };
 
-      particles.forEach((particle, index) => {
+    const drawParticles = (time: number, deltaScale: number) => {
+      const connectionDistanceSquared = PARTICLE_GRID_SIZE * PARTICLE_GRID_SIZE;
+      const particleCount = particles.length;
+      gridHead.fill(-1);
+      gridNext.fill(-1);
+      edgeFlags.fill(0);
+
+      for (let index = 0; index < particleCount; index += 1) {
+        const particle = particles[index];
         if (!reducedMotion) {
-          particle.x += particle.vx + Math.sin(time * 0.76 + particle.phase) * 0.075;
-          particle.y += particle.vy + Math.cos(time * 0.66 + particle.phase) * 0.065;
+          particle.x += (particle.vx + Math.sin(time * 0.76 + particle.phase) * 0.075) * deltaScale;
+          particle.y += (particle.vy + Math.cos(time * 0.66 + particle.phase) * 0.065) * deltaScale;
 
-          const pointerDistanceX = pointerX - particle.x;
-          const pointerDistanceY = pointerY - particle.y;
-          const pointerDistance = Math.hypot(pointerDistanceX, pointerDistanceY);
-          if (pointerDistance < 190 && pointerDistance > 1) {
-            const influence = (1 - pointerDistance / 190) * 0.006;
-            particle.x += pointerDistanceX * influence;
-            particle.y += pointerDistanceY * influence;
+          if (pointerX > -500) {
+            const pointerDistanceX = pointerX - particle.x;
+            const pointerDistanceY = pointerY - particle.y;
+            const pointerDistanceSquared =
+              pointerDistanceX * pointerDistanceX + pointerDistanceY * pointerDistanceY;
+            if (pointerDistanceSquared < 190 * 190 && pointerDistanceSquared > 1) {
+              const pointerDistance = Math.sqrt(pointerDistanceSquared);
+              const influence = (1 - pointerDistance / 190) * 0.006 * deltaScale;
+              particle.x += pointerDistanceX * influence;
+              particle.y += pointerDistanceY * influence;
+            }
           }
 
           if (particle.x < -20) particle.x = width + 20;
@@ -171,73 +425,328 @@ function LiveBackground() {
           if (particle.y > height + 20) particle.y = -20;
         }
 
-        for (let nextIndex = index + 1; nextIndex < particles.length; nextIndex += 1) {
-          const next = particles[nextIndex];
-          const distance = Math.hypot(next.x - particle.x, next.y - particle.y);
-          if (distance > 160) continue;
-          context.beginPath();
-          context.moveTo(particle.x, particle.y);
-          context.lineTo(next.x, next.y);
-          context.strokeStyle = "rgba(150, 132, 220, " + ((1 - distance / 160) * 0.16) + ")";
-          context.lineWidth = 0.65;
-          context.stroke();
+        const cellX = Math.max(
+          0,
+          Math.min(gridColumns - 1, Math.floor(particle.x / PARTICLE_GRID_SIZE)),
+        );
+        const cellY = Math.max(
+          0,
+          Math.min(gridRows - 1, Math.floor(particle.y / PARTICLE_GRID_SIZE)),
+        );
+        const cellIndex = cellY * gridColumns + cellX;
+        gridNext[index] = gridHead[cellIndex];
+        gridHead[cellIndex] = index;
+      }
+
+      let connectionCount = 0;
+      for (let index = 0; index < particleCount; index += 1) {
+        const particle = particles[index];
+        const cellX = Math.max(
+          0,
+          Math.min(gridColumns - 1, Math.floor(particle.x / PARTICLE_GRID_SIZE)),
+        );
+        const cellY = Math.max(
+          0,
+          Math.min(gridRows - 1, Math.floor(particle.y / PARTICLE_GRID_SIZE)),
+        );
+        let nearestIndex = -1;
+        let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+        let secondIndex = -1;
+        let secondDistanceSquared = Number.POSITIVE_INFINITY;
+
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+            const nearbyCellX = cellX + offsetX;
+            const nearbyCellY = cellY + offsetY;
+            if (
+              nearbyCellX < 0 ||
+              nearbyCellX >= gridColumns ||
+              nearbyCellY < 0 ||
+              nearbyCellY >= gridRows
+            ) continue;
+
+            let candidateIndex = gridHead[nearbyCellY * gridColumns + nearbyCellX];
+            while (candidateIndex !== -1) {
+              if (candidateIndex === index) {
+                candidateIndex = gridNext[candidateIndex];
+                continue;
+              }
+              const candidate = particles[candidateIndex];
+              const distanceX = candidate.x - particle.x;
+              const distanceY = candidate.y - particle.y;
+              const distanceSquared = distanceX * distanceX + distanceY * distanceY;
+              if (distanceSquared <= connectionDistanceSquared) {
+                if (distanceSquared < nearestDistanceSquared) {
+                  secondIndex = nearestIndex;
+                  secondDistanceSquared = nearestDistanceSquared;
+                  nearestIndex = candidateIndex;
+                  nearestDistanceSquared = distanceSquared;
+                } else if (distanceSquared < secondDistanceSquared) {
+                  secondIndex = candidateIndex;
+                  secondDistanceSquared = distanceSquared;
+                }
+              }
+              candidateIndex = gridNext[candidateIndex];
+            }
+          }
         }
 
+        for (let connectionIndex = 0; connectionIndex < MAX_PARTICLE_CONNECTIONS; connectionIndex += 1) {
+          const nextIndex = connectionIndex === 0 ? nearestIndex : secondIndex;
+          const distanceSquared = connectionIndex === 0
+            ? nearestDistanceSquared
+            : secondDistanceSquared;
+          if (nextIndex === -1) continue;
+
+          const lowerIndex = Math.min(index, nextIndex);
+          const upperIndex = Math.max(index, nextIndex);
+          const edgeIndex = lowerIndex * particleCount + upperIndex;
+          if (edgeFlags[edgeIndex]) continue;
+          edgeFlags[edgeIndex] = 1;
+
+          const strength = 1 - distanceSquared / connectionDistanceSquared;
+          connectionFrom[connectionCount] = index;
+          connectionTo[connectionCount] = nextIndex;
+          connectionAlphaBin[connectionCount] = Math.min(
+            CONNECTION_ALPHA_LEVELS.length - 1,
+            Math.floor(strength * CONNECTION_ALPHA_LEVELS.length),
+          );
+          connectionCount += 1;
+        }
+      }
+
+      for (let alphaIndex = 0; alphaIndex < CONNECTION_ALPHA_LEVELS.length; alphaIndex += 1) {
+        const alpha = CONNECTION_ALPHA_LEVELS[alphaIndex];
         context.beginPath();
-        context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
-        context.fillStyle = "rgba(" + particle.color + ", 0.68)";
-        context.shadowBlur = 13;
-        context.shadowColor = "rgba(" + particle.color + ", 0.58)";
-        context.fill();
-        context.shadowBlur = 0;
+        let hasConnections = false;
+        for (let connectionIndex = 0; connectionIndex < connectionCount; connectionIndex += 1) {
+          if (connectionAlphaBin[connectionIndex] !== alphaIndex) continue;
+          const from = particles[connectionFrom[connectionIndex]];
+          const to = particles[connectionTo[connectionIndex]];
+          context.moveTo(from.x, from.y);
+          context.lineTo(to.x, to.y);
+          hasConnections = true;
+        }
+        if (!hasConnections) continue;
+        context.strokeStyle = `rgba(150, 132, 220, ${alpha})`;
+        context.lineWidth = 0.65;
+        context.stroke();
+      }
+
+      for (let index = 0; index < particleCount; index += 1) {
+        const particle = particles[index];
+        const haloRadius = 9 + particle.radius * 4.5;
+        context.drawImage(
+          particle.sprite,
+          particle.x - haloRadius,
+          particle.y - haloRadius,
+          haloRadius * 2,
+          haloRadius * 2,
+        );
 
         if (index % 9 === 0) {
           const pulse = (time * 0.72 + particle.phase / (Math.PI * 2)) % 1;
           context.beginPath();
           context.arc(particle.x, particle.y, 8 + pulse * 26, 0, Math.PI * 2);
-          context.strokeStyle = "rgba(" + particle.color + ", " + ((1 - pulse) * 0.16) + ")";
+          context.strokeStyle = `rgba(${particle.color}, ${(1 - pulse) * 0.14})`;
           context.lineWidth = 0.8;
           context.stroke();
         }
-      });
+      }
+    };
 
+    const draw = (deltaScale: number) => {
+      const deltaMilliseconds = deltaScale * BASE_FRAME_INTERVAL;
+      sceneTime += deltaMilliseconds * 0.001;
+      const time = sceneTime;
+      context.clearRect(0, 0, width, height);
+      context.globalCompositeOperation = "screen";
+
+      drawAmbientGlows(deltaMilliseconds);
+      drawRibbon(time, height * 0.24, height * 0.065, 0.34, ribbonGradients[0], 0.4);
+      drawRibbon(time, height * 0.58, height * 0.085, -0.28, ribbonGradients[1], 2.1);
+      drawRibbon(time, height * 0.83, height * 0.055, 0.25, ribbonGradients[2], 4.2);
+
+      if (pointerX > -500) {
+        const pointerRadius = 145;
+        context.globalAlpha = 0.58;
+        context.drawImage(
+          pointerSprite,
+          pointerX - pointerRadius,
+          pointerY - pointerRadius,
+          pointerRadius * 2,
+          pointerRadius * 2,
+        );
+        context.globalAlpha = 1;
+      }
+
+      drawComets(deltaScale);
+      drawParticles(time, deltaScale);
       context.globalCompositeOperation = "source-over";
-      if (!reducedMotion && !document.hidden) animationFrame = window.requestAnimationFrame(draw);
+    };
+
+    const frameIntervalFor = (timestamp: number) => {
+      if (document.body.style.overflow === "hidden") return OBSCURED_FRAME_INTERVAL;
+      return canvas.width * canvas.height > 2_000_000 || timestamp >= activeUntil
+        ? IDLE_FRAME_INTERVAL
+        : ACTIVE_FRAME_INTERVAL;
+    };
+
+    const stop = () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(frameTimer);
+      animationFrame = 0;
+      frameTimer = 0;
+    };
+
+    const scheduleNextFrame = (delay: number) => {
+      window.clearTimeout(frameTimer);
+      frameTimer = window.setTimeout(() => {
+        animationFrame = window.requestAnimationFrame(renderFrame);
+      }, Math.max(0, delay - FRAME_WAKE_AHEAD));
+    };
+
+    const renderFrame = (timestamp: number) => {
+      if (document.hidden || !windowFocused || isPrinting || isScrolling) return;
+
+      if (lastDrawTime === 0) {
+        lastDrawTime = timestamp;
+        lastRenderTime = timestamp;
+        draw(1);
+        if (!reducedMotion) scheduleNextFrame(frameIntervalFor(timestamp));
+        return;
+      }
+
+      const frameInterval = frameIntervalFor(timestamp);
+      const elapsed = timestamp - lastDrawTime;
+      if (!reducedMotion && elapsed < frameInterval - FRAME_TOLERANCE) {
+        scheduleNextFrame(frameInterval - elapsed);
+        return;
+      }
+
+      const elapsedSinceRender = timestamp - lastRenderTime;
+      lastDrawTime = timestamp;
+      lastRenderTime = timestamp;
+      draw(Math.min(elapsedSinceRender / BASE_FRAME_INTERVAL, MAX_DELTA_SCALE));
+      if (!reducedMotion) scheduleNextFrame(frameIntervalFor(timestamp));
     };
 
     const start = () => {
-      window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(draw);
+      stop();
+      lastDrawTime = 0;
+      lastRenderTime = 0;
+      if (!document.hidden && windowFocused && !isPrinting && !isScrolling) {
+        animationFrame = window.requestAnimationFrame(renderFrame);
+      }
+    };
+
+    const setPausedClass = (paused: boolean) => {
+      document.documentElement.classList.toggle("app-motion-paused", paused);
+    };
+
+    const handleResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resize();
+        start();
+      }, 120);
     };
     const handlePointerMove = (event: PointerEvent) => {
       pointerX = event.clientX;
       pointerY = event.clientY;
+      activeUntil = window.performance.now() + ACTIVE_WINDOW;
     };
     const handlePointerLeave = () => {
       pointerX = -1000;
       pointerY = -1000;
     };
     const handleVisibility = () => {
-      if (document.hidden) window.cancelAnimationFrame(animationFrame);
+      const paused = document.hidden || !windowFocused || isPrinting;
+      setPausedClass(paused);
+      if (paused) stop();
       else start();
+    };
+    const handleWindowBlur = () => {
+      windowFocused = false;
+      setPausedClass(true);
+      stop();
+    };
+    const handleWindowFocus = () => {
+      windowFocused = true;
+      activeUntil = window.performance.now() + ACTIVE_WINDOW;
+      const paused = document.hidden || isPrinting;
+      setPausedClass(paused);
+      if (!paused) start();
+    };
+    const handleScroll = () => {
+      isScrolling = true;
+      setPausedClass(true);
+      stop();
+      window.clearTimeout(scrollResumeTimer);
+      scrollResumeTimer = window.setTimeout(() => {
+        isScrolling = false;
+        activeUntil = window.performance.now() + ACTIVE_WINDOW;
+        const paused = document.hidden || !windowFocused || isPrinting;
+        setPausedClass(paused);
+        if (!paused) start();
+      }, 110);
+    };
+    const handlePageHide = () => {
+      setPausedClass(true);
+      stop();
+    };
+    const handlePageShow = () => {
+      windowFocused = document.hasFocus();
+      const paused = document.hidden || !windowFocused || isPrinting;
+      setPausedClass(paused);
+      if (!paused) start();
+    };
+    const handleBeforePrint = () => {
+      isPrinting = true;
+      setPausedClass(true);
+      stop();
+    };
+    const handleAfterPrint = () => {
+      isPrinting = false;
+      const paused = document.hidden || !windowFocused;
+      setPausedClass(paused);
+      if (!paused) start();
     };
     const handleMotionPreference = (event: MediaQueryListEvent) => {
       reducedMotion = event.matches;
       start();
     };
 
+    setPausedClass(document.hidden || !windowFocused || isPrinting);
     resize();
     start();
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", handleResize);
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("beforeprint", handleBeforePrint);
+    window.addEventListener("afterprint", handleAfterPrint);
     document.addEventListener("pointerleave", handlePointerLeave);
     document.addEventListener("visibilitychange", handleVisibility);
     motionPreference.addEventListener("change", handleMotionPreference);
 
     return () => {
-      window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener("resize", resize);
+      stop();
+      window.clearTimeout(resizeTimer);
+      window.clearTimeout(scrollResumeTimer);
+      document.documentElement.classList.remove("app-motion-paused");
+      window.removeEventListener("resize", handleResize);
       window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("beforeprint", handleBeforePrint);
+      window.removeEventListener("afterprint", handleAfterPrint);
       document.removeEventListener("pointerleave", handlePointerLeave);
       document.removeEventListener("visibilitychange", handleVisibility);
       motionPreference.removeEventListener("change", handleMotionPreference);
@@ -247,135 +756,11 @@ function LiveBackground() {
   return <canvas ref={canvasRef} className="live-background-canvas" aria-hidden="true" />;
 }
 
-type GlowWaypoint = {
-  x: number;
-  y: number;
-  scale: number;
-  opacity: number;
-};
-
-const glowTransform = (waypoint: GlowWaypoint) =>
-  `translate3d(${waypoint.x}vw, ${waypoint.y}vh, 0) scale(${waypoint.scale})`;
-
-function RandomAmbientGlows() {
-  const glowRefs = useRef<Array<HTMLDivElement | null>>([]);
-
-  useEffect(() => {
-    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const animations: Array<Animation | undefined> = [];
-    const timers: Array<number | undefined> = [];
-    let disposed = false;
-
-    const randomWaypoint = (): GlowWaypoint => ({
-      x: -4 + Math.random() * 104,
-      y: -6 + Math.random() * 104,
-      scale: 0.82 + Math.random() * 0.38,
-      opacity: 0.22 + Math.random() * 0.13,
-    });
-
-    const placeGlow = (element: HTMLDivElement, waypoint: GlowWaypoint) => {
-      element.style.transform = glowTransform(waypoint);
-      element.style.opacity = String(waypoint.opacity);
-    };
-
-    const stopMotion = () => {
-      timers.forEach((timer, index) => {
-        if (timer !== undefined) window.clearTimeout(timer);
-        timers[index] = undefined;
-      });
-      animations.forEach((animation, index) => {
-        if (animation) {
-          animation.onfinish = null;
-          animation.cancel();
-        }
-        animations[index] = undefined;
-      });
-    };
-
-    const travel = (element: HTMLDivElement, index: number, current: GlowWaypoint) => {
-      if (disposed || motionPreference.matches) return;
-
-      let next = randomWaypoint();
-      let distance = Math.hypot(next.x - current.x, next.y - current.y);
-      for (let attempt = 0; attempt < 4 && distance < 26; attempt += 1) {
-        next = randomWaypoint();
-        distance = Math.hypot(next.x - current.x, next.y - current.y);
-      }
-
-      const duration = Math.max(2200, Math.min(6200, distance * (55 + Math.random() * 20)));
-      const animation = element.animate(
-        [
-          { transform: glowTransform(current), opacity: current.opacity },
-          { transform: glowTransform(next), opacity: next.opacity },
-        ],
-        {
-          duration,
-          easing: "cubic-bezier(0.42, 0, 0.25, 1)",
-          fill: "forwards",
-        },
-      );
-      animations[index] = animation;
-
-      animation.onfinish = () => {
-        if (disposed) return;
-        placeGlow(element, next);
-        animation.cancel();
-        animations[index] = undefined;
-        timers[index] = window.setTimeout(
-          () => travel(element, index, next),
-          60 + Math.random() * 300,
-        );
-      };
-    };
-
-    const startMotion = () => {
-      stopMotion();
-      glowRefs.current.forEach((element, index) => {
-        if (!element) return;
-        const initial = randomWaypoint();
-        placeGlow(element, initial);
-        if (!motionPreference.matches) {
-          timers[index] = window.setTimeout(
-            () => travel(element, index, initial),
-            80 + index * 110 + Math.random() * 240,
-          );
-        }
-      });
-    };
-
-    const handleMotionPreference = () => startMotion();
-    startMotion();
-    motionPreference.addEventListener("change", handleMotionPreference);
-
-    return () => {
-      disposed = true;
-      stopMotion();
-      motionPreference.removeEventListener("change", handleMotionPreference);
-    };
-  }, []);
-
-  const glowNames = ["one", "two", "three", "four", "five"];
-  return (
-    <>
-      {glowNames.map((name, index) => (
-        <div
-          key={name}
-          ref={(element) => {
-            glowRefs.current[index] = element;
-          }}
-          className={`ambient ambient-${name}`}
-        />
-      ))}
-    </>
-  );
-}
-
 export function AppBackdrop() {
   return (
     <div className="animated-backdrop" aria-hidden="true">
       <div className="backdrop-grid" />
       <LiveBackground />
-      <RandomAmbientGlows />
       <div className="backdrop-glow" />
     </div>
   );

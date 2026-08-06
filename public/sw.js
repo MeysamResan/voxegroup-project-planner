@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "voxe-pricing-studio-v";
-const CACHE_NAME = `${CACHE_PREFIX}40`;
+const CACHE_NAME = `${CACHE_PREFIX}45`;
 const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 const openCache = () => caches.open(CACHE_NAME);
