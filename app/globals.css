@@ -1167,24 +1167,6 @@ textarea:focus-visible {
   gap: 11px;
 }
 
-.commercial-adjustment-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
-  min-width: 0;
-  align-items: end;
-  gap: 8px;
-}
-
-.commercial-adjustment-control > .note-button {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-}
-
-.commercial-adjustment-notes {
-  grid-column: 1 / -1;
-}
-
 .pricing-hidden-state {
   display: flex;
   flex: 1;
@@ -2264,9 +2246,6 @@ input[type="number"] {
 
 .note-button {
   position: relative;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
   border-color: rgba(168, 140, 255, 0.2);
   background: rgba(132, 91, 239, 0.075);
   color: #bba9e8;

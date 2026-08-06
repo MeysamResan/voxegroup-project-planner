@@ -28,6 +28,19 @@ For development:
 npm run dev
 ```
 
+## Architecture
+
+- `lib/pricing` contains the typed pricing model, calculations, normalization, selectors and immutable workspace actions.
+- `components/ui` is the shared design system for fields, buttons, overlays, selectors, summaries and panel controls.
+- `features/pricing` composes reusable project-settings, staffing, estimate and analytics modules around a small controller.
+- `app/page.tsx` is intentionally only the route entry point.
+
+Run the production build and all domain, workspace and rendered-page regression tests with:
+
+```bash
+npm test
+```
+
 ## Host it
 
 The source is a Vinext application targeting a Cloudflare-compatible server runtime. Install dependencies, run `npm run build`, then deploy the generated `dist` artifact through the target host's normal Cloudflare Worker-compatible process.

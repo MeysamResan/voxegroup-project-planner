@@ -1,10 +1,22 @@
-const CACHE_NAME = "voxe-pricing-studio-v37";
+const CACHE_PREFIX = "voxe-pricing-studio-v";
+const CACHE_NAME = `${CACHE_PREFIX}40`;
 const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
+
+const openCache = () => caches.open(CACHE_NAME);
+
+const canCache = (request, response) =>
+  response.status === 200 &&
+  !request.headers.has("range") &&
+  !response.headers.get("cache-control")?.toLowerCase().includes("no-store");
+
+const storeResponse = (cache, cacheKey, response, sourceRequest = cacheKey) => {
+  if (!canCache(sourceRequest, response)) return Promise.resolve();
+  return cache.put(cacheKey, response.clone()).catch(() => undefined);
+};
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
+    openCache()
       .then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting()),
   );
@@ -14,7 +26,11 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key)),
+      ))
       .then(() => self.clients.claim()),
   );
 });
@@ -24,18 +40,35 @@ self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
 
+  if (event.request.mode === "navigate") {
+    const networkResponse = fetch(event.request);
+    event.waitUntil(
+      networkResponse
+        .then((response) => openCache().then(
+          (cache) => storeResponse(cache, "/", response, event.request),
+        ))
+        .catch(() => undefined),
+    );
+    event.respondWith(
+      networkResponse
+        .catch(() => openCache().then(
+          (cache) => cache.match("/").then((cached) => cached || Response.error()),
+        )),
+    );
+    return;
+  }
+
+  const cacheableAsset =
+    ["font", "image", "script", "style"].includes(event.request.destination) ||
+    APP_SHELL.includes(requestUrl.pathname);
+  if (!cacheableAsset) return;
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    openCache().then((cache) => cache.match(event.request).then(async (cached) => {
       if (cached) return cached;
-      return fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match("/"));
-    }),
+      const response = await fetch(event.request);
+      await storeResponse(cache, event.request, response);
+      return response;
+    })),
   );
 });
