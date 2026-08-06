@@ -4,19 +4,21 @@ import {
   ChangeEvent,
   DragEvent,
   FormEvent,
+  useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowDownToLine,
   BriefcaseBusiness,
   CalendarDays,
   Check,
-  ChevronLeft,
-  ChevronRight,
+  ChevronDown,
   CircleDollarSign,
   Clock3,
   Copy,
@@ -25,6 +27,7 @@ import {
   HardDrive,
   Info,
   LockKeyhole,
+  Minus,
   Plus,
   Printer,
   ShieldCheck,
@@ -371,6 +374,12 @@ const billingLabels: Record<ExpenseBilling, string> = {
   markup: "Pass + markup",
 };
 
+type GlassOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
 const personTypeClass = (type: PersonType) => type.toLowerCase().replace(" ", "-");
 
 function calculateScenario(scenario: Scenario, people: Person[]) {
@@ -625,32 +634,250 @@ function Modal({
   );
 }
 
+function GlassSelect({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  className = "",
+}: {
+  value: string;
+  options: GlassOption[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  const positionMenu = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 12;
+    const availableBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const maxHeight = Math.min(320, Math.max(160, window.innerHeight - viewportPadding * 2));
+    const openAbove = availableBelow < 180 && rect.top > availableBelow;
+    setMenuStyle({
+      left: Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 190) - viewportPadding)),
+      top: openAbove ? Math.max(viewportPadding, rect.top - Math.min(maxHeight, options.length * 48 + 16) - gap) : rect.bottom + gap,
+      width: Math.max(rect.width, 190),
+      maxHeight,
+    });
+  }, [options.length]);
+
+  const openMenu = () => {
+    positionMenu();
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const handlePosition = () => positionMenu();
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handlePosition);
+    window.addEventListener("scroll", handlePosition, true);
+    window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+    });
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handlePosition);
+      window.removeEventListener("scroll", handlePosition, true);
+    };
+  }, [open, positionMenu]);
+
+  const choose = (option: GlassOption) => {
+    if (option.disabled) return;
+    onChange(option.value);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const menu = open && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          id={menuId}
+          ref={menuRef}
+          className="glass-select-menu"
+          role="listbox"
+          aria-label={ariaLabel}
+          style={menuStyle}
+          onBlur={() => window.requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (!menuRef.current?.contains(active) && active !== triggerRef.current) setOpen(false);
+          })}
+        >
+          {options.map((option) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className="glass-select-option"
+              disabled={option.disabled}
+              key={option.value}
+              onClick={() => choose(option)}
+              onKeyDown={(event) => {
+                const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>(".glass-select-option:not(:disabled)") ?? []);
+                const index = items.indexOf(event.currentTarget);
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  const next = event.key === "ArrowDown" ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+                  items[next]?.focus();
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  items[event.key === "Home" ? 0 : items.length - 1]?.focus();
+                } else if (event.key.length === 1 && /\S/.test(event.key)) {
+                  const query = event.key.toLocaleLowerCase();
+                  const ordered = [...items.slice(index + 1), ...items.slice(0, index + 1)];
+                  ordered.find((item) => item.textContent?.trim().toLocaleLowerCase().startsWith(query))?.focus();
+                }
+              }}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <Check size={16} />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={"glass-select-trigger " + className}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-controls={menuId}
+        aria-expanded={open}
+        onClick={() => open ? setOpen(false) : openMenu()}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            openMenu();
+          }
+        }}
+      >
+        <span>{selected?.label ?? value}</span>
+        <ChevronDown size={16} className={open ? "rotated" : ""} />
+      </button>
+      {menu}
+    </>
+  );
+}
+
+function NumberStepper({
+  value,
+  onChange,
+  suffix,
+  min,
+  max,
+  step = 1,
+  ariaLabel,
+  compact = false,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  suffix?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  ariaLabel: string;
+  compact?: boolean;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+
+  const commit = (nextValue: number) => {
+    const bounded = Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, nextValue));
+    const normalized = Math.round((bounded + Number.EPSILON) * 10000) / 10000;
+    setDraft(String(normalized));
+    onChange(normalized);
+  };
+
+  const stepBy = (direction: -1 | 1) => {
+    const current = editing ? Number(draft) : value;
+    commit((Number.isFinite(current) ? current : value) + step * direction);
+  };
+
+  return (
+    <div className={"number-stepper " + (compact ? "compact-stepper" : "") }>
+      <button type="button" onClick={() => stepBy(-1)} disabled={min !== undefined && value <= min} aria-label={"Decrease " + ariaLabel}>
+        <Minus size={compact ? 13 : 15} />
+      </button>
+      <input
+        type="number"
+        inputMode="decimal"
+        aria-label={ariaLabel}
+        value={editing ? draft : String(value)}
+        min={min}
+        max={max}
+        step={step}
+        onFocus={() => {
+          setDraft(String(value));
+          setEditing(true);
+        }}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          const parsed = Number(nextDraft);
+          if (nextDraft !== "" && nextDraft !== "-" && Number.isFinite(parsed)) onChange(parsed);
+        }}
+        onBlur={() => {
+          const parsed = Number(draft);
+          commit(Number.isFinite(parsed) ? parsed : value);
+          setEditing(false);
+        }}
+      />
+      {suffix && <em>{suffix}</em>}
+      <button type="button" onClick={() => stepBy(1)} disabled={max !== undefined && value >= max} aria-label={"Increase " + ariaLabel}>
+        <Plus size={compact ? 13 : 15} />
+      </button>
+    </div>
+  );
+}
+
 function MoneyInput({
   value,
   onChange,
   label,
   suffix,
   min,
+  max,
+  step = 1,
 }: {
   value: number;
   onChange: (value: number) => void;
   label: string;
   suffix?: string;
   min?: number;
+  max?: number;
+  step?: number;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <div className="input-shell">
-        <input
-          type="number"
-          value={value}
-          min={min}
-          step="any"
-          onChange={(event) => onChange(numberValue(event.target.value))}
-        />
-        {suffix && <em>{suffix}</em>}
-      </div>
+      <NumberStepper value={value} onChange={onChange} suffix={suffix} min={min} max={max} step={step} ariaLabel={label} />
     </label>
   );
 }
@@ -659,7 +886,6 @@ export default function Home() {
   const [workspace, setWorkspace] = useState<Workspace>(() => initialWorkspace());
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<ViewMode>("internal");
-  const [peopleOpen, setPeopleOpen] = useState(true);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isNewPerson, setIsNewPerson] = useState(false);
   const [phasePickerId, setPhasePickerId] = useState<string | null>(null);
@@ -945,9 +1171,14 @@ export default function Home() {
   const expenseResult = (expenseId: string) => calculation.expenseResults.find((item) => item.id === expenseId);
 
   return (
-    <main className={"app-shell " + (peopleOpen && view === "internal" ? "with-people" : "") }>
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
+    <main className="app-shell">
+      <div className="animated-backdrop" aria-hidden="true">
+        <div className="backdrop-grid" />
+        <div className="ambient ambient-one" />
+        <div className="ambient ambient-two" />
+        <div className="ambient ambient-three" />
+        <div className="backdrop-glow" />
+      </div>
 
       <header className="topbar glass-panel">
         <div className="brand-block">
@@ -1045,12 +1276,13 @@ export default function Home() {
           <section className="command-row">
             <div className="scenario-control glass-panel">
               <span>Scenario</span>
-              <select
+              <GlassSelect
+                ariaLabel="Active scenario"
+                className="scenario-select"
                 value={workspace.activeScenarioId}
-                onChange={(event) => setWorkspace((current) => ({ ...current, activeScenarioId: event.target.value }))}
-              >
-                {workspace.scenarios.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
+                options={workspace.scenarios.map((item) => ({ value: item.id, label: item.name }))}
+                onChange={(activeScenarioId) => setWorkspace((current) => ({ ...current, activeScenarioId }))}
+              />
               <button className="icon-button" onClick={duplicateScenario} title="Duplicate scenario"><Copy size={16} /></button>
               <button
                 className="icon-button danger"
@@ -1101,23 +1333,31 @@ export default function Home() {
             <div className="settings-grid">
               <label className="field">
                 <span>Currency</span>
-                <select value={scenario.currency} onChange={(event) => updateScenario({ currency: event.target.value as Currency })}>
-                  <option value="USD">USD — US Dollar</option>
-                  <option value="IQD">IQD — Iraqi Dinar</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="GBP">GBP — Pound</option>
-                </select>
+                <GlassSelect
+                  ariaLabel="Currency"
+                  value={scenario.currency}
+                  options={[
+                    { value: "USD", label: "USD — US Dollar" },
+                    { value: "IQD", label: "IQD — Iraqi Dinar" },
+                    { value: "EUR", label: "EUR — Euro" },
+                    { value: "GBP", label: "GBP — Pound" },
+                  ]}
+                  onChange={(currency) => updateScenario({ currency: currency as Currency })}
+                />
               </label>
               <MoneyInput label="Client rate" value={scenario.clientRate} onChange={(clientRate) => updateScenario({ clientRate })} suffix="/ person-hour" min={0} />
-              <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} />
-              <MoneyInput label="Default hours / day" value={scenario.defaultHours} onChange={(defaultHours) => updateScenario({ defaultHours })} suffix="hours" min={0} />
-              <MoneyInput label="Target gross margin" value={scenario.targetMargin} onChange={(targetMargin) => updateScenario({ targetMargin })} suffix="%" min={0} />
+              <MoneyInput label="Fixed starting fee" value={scenario.fixedFee} onChange={(fixedFee) => updateScenario({ fixedFee })} min={0} step={50} />
+              <MoneyInput label="Default hours / day" value={scenario.defaultHours} onChange={(defaultHours) => updateScenario({ defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
+              <MoneyInput label="Target gross margin" value={scenario.targetMargin} onChange={(targetMargin) => updateScenario({ targetMargin })} suffix="%" min={0} max={95} />
               <MoneyInput label="Risk reserve" value={scenario.riskReserve} onChange={(riskReserve) => updateScenario({ riskReserve })} suffix="%" min={0} />
               <label className="field">
                 <span>Rounding</span>
-                <select value={scenario.rounding} onChange={(event) => updateScenario({ rounding: numberValue(event.target.value) })}>
-                  {[1, 50, 100, 500, 1000, 100000].map((value) => <option key={value} value={value}>{currencyFormat(scenario.currency, value)}</option>)}
-                </select>
+                <GlassSelect
+                  ariaLabel="Quote rounding"
+                  value={String(scenario.rounding)}
+                  options={[1, 50, 100, 500, 1000, 100000].map((value) => ({ value: String(value), label: currencyFormat(scenario.currency, value) }))}
+                  onChange={(rounding) => updateScenario({ rounding: numberValue(rounding) })}
+                />
               </label>
               <label className="field">
                 <span>Start date</span>
@@ -1159,10 +1399,42 @@ export default function Home() {
 
           <section className="phases-card glass-panel">
             <div className="section-heading">
-              <div><p className="eyebrow">02 • Delivery plan</p><h2>Phases & staffing</h2><p>Drag circular profiles from the people dock into any phase.</p></div>
+              <div><p className="eyebrow">02 • Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
               <button className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>
             </div>
-            <div className="phase-table">
+            <div className="delivery-workspace">
+              <aside className="people-sidebar" aria-label="People sidebar">
+                <div className="dock-heading">
+                  <div><p className="eyebrow">Talent pool</p><h3>People</h3></div>
+                  <button className="icon-button accent" onClick={openNewPerson} aria-label="Add person"><Plus size={17} /></button>
+                </div>
+                <p className="dock-hint">Drag a person into a phase, or click a profile to edit it.</p>
+                <div className="people-list">
+                  {workspace.people.map((person) => (
+                    <button
+                      type="button"
+                      key={person.id}
+                      className={"person-card " + personTypeClass(person.type)}
+                      style={{ "--person-color": person.color } as React.CSSProperties}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("application/x-voxe-person", person.id);
+                        event.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => { setEditingPerson(person); setIsNewPerson(false); }}
+                    >
+                      <span className="person-card-avatar">{initials(person.name)}</span>
+                      <span className="person-card-copy"><strong>{person.name}</strong><small>{person.role}</small><em>{person.type}</em></span>
+                      <GripVertical size={17} />
+                    </button>
+                  ))}
+                  <button type="button" className="add-person-card" onClick={openNewPerson}><UserPlus size={18} /><span>Add someone</span></button>
+                </div>
+                <div className="dock-footer"><Users size={17} /><span>{workspace.people.length} people available</span></div>
+              </aside>
+
+              <div className="phase-workspace">
+                <div className="phase-table">
               <div className="phase-table-head">
                 <span>Phase</span><span>Schedule</span><span>Workdays</span><span>Assigned people</span><span>Hours</span><span>Cost</span><span />
               </div>
@@ -1177,11 +1449,16 @@ export default function Home() {
                     onDrop={(event) => handleDrop(event, phase.id)}
                   >
                     <div className="phase-name-cell"><GripVertical size={16} /><b>{String(index + 1).padStart(2, "0")}</b><input value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></div>
-                    <select value={phase.schedule} onChange={(event) => updatePhase(phase.id, { schedule: event.target.value as Phase["schedule"] })}>
-                      <option value="sequential">After previous</option>
-                      <option value="parallel" disabled={index === 0}>Alongside previous</option>
-                    </select>
-                    <div className="compact-input"><input type="number" min="0" value={phase.days} onChange={(event) => updatePhase(phase.id, { days: numberValue(event.target.value) })} /><span>days</span></div>
+                    <GlassSelect
+                      ariaLabel={phase.name + " schedule"}
+                      value={phase.schedule}
+                      options={[
+                        { value: "sequential", label: "After previous" },
+                        { value: "parallel", label: "Alongside previous", disabled: index === 0 },
+                      ]}
+                      onChange={(schedule) => updatePhase(phase.id, { schedule: schedule as Phase["schedule"] })}
+                    />
+                    <NumberStepper compact ariaLabel={phase.name + " workdays"} value={phase.days} min={0} step={1} suffix="days" onChange={(days) => updatePhase(phase.id, { days })} />
                     <div className="assignment-zone">
                       {phase.assignments.map((assignment) => {
                         const person = workspace.people.find((item) => item.id === assignment.personId);
@@ -1189,15 +1466,16 @@ export default function Home() {
                         return (
                           <div className="assignment-pill" key={person.id} title={person.name + " • " + person.role}>
                             <i style={{ background: person.color }}>{initials(person.name)}</i>
-                            <input
-                              aria-label={person.name + " hours per day"}
-                              type="number"
-                              min="0"
-                              max="24"
+                            <NumberStepper
+                              compact
+                              ariaLabel={person.name + " hours per day"}
                               value={assignment.hoursPerDay}
-                              onChange={(event) => updateAssignmentHours(phase.id, person.id, numberValue(event.target.value))}
+                              min={0}
+                              max={24}
+                              step={0.5}
+                              suffix="h/d"
+                              onChange={(hoursPerDay) => updateAssignmentHours(phase.id, person.id, hoursPerDay)}
                             />
-                            <span>h/d</span>
                             <button onClick={() => unassignPerson(phase.id, person.id)} aria-label={"Remove " + person.name}><X size={12} /></button>
                           </div>
                         );
@@ -1213,6 +1491,8 @@ export default function Home() {
                 );
               })}
               {!scenario.phases.length && <div className="empty-state"><CalendarDays size={24} /><strong>No delivery phases yet</strong><span>Add the first phase to begin the estimate.</span></div>}
+                </div>
+              </div>
             </div>
           </section>
 
@@ -1225,10 +1505,10 @@ export default function Home() {
                   return (
                     <div className="data-row expense-row" key={expense.id}>
                       <input className="row-name" value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
-                      <div className="compact-input"><input type="number" min="0" step="any" value={expense.amount} onChange={(event) => updateExpense(expense.id, { amount: numberValue(event.target.value) })} /><span>{scenario.currency}</span></div>
-                      <select value={expense.unit} onChange={(event) => updateExpense(expense.id, { unit: event.target.value as ExpenseUnit })}>{Object.entries(unitLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-                      <select value={expense.billing} onChange={(event) => updateExpense(expense.id, { billing: event.target.value as ExpenseBilling })}>{Object.entries(billingLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-                      {expense.billing === "markup" && <div className="compact-input tiny"><input type="number" value={expense.markup} onChange={(event) => updateExpense(expense.id, { markup: numberValue(event.target.value) })} /><span>%</span></div>}
+                      <NumberStepper compact ariaLabel={expense.name + " amount"} value={expense.amount} min={0} step={1} suffix={scenario.currency} onChange={(amount) => updateExpense(expense.id, { amount })} />
+                      <GlassSelect ariaLabel={expense.name + " unit"} value={expense.unit} options={Object.entries(unitLabels).map(([value, label]) => ({ value, label }))} onChange={(unit) => updateExpense(expense.id, { unit: unit as ExpenseUnit })} />
+                      <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
+                      {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
                       <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
                       <button className="icon-button danger" onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
                     </div>
@@ -1244,9 +1524,9 @@ export default function Home() {
                 {scenario.modifiers.map((modifier) => (
                   <div className="data-row modifier-row" key={modifier.id}>
                     <input className="row-name" value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
-                    <select value={modifier.target} onChange={(event) => updateModifier(modifier.id, { target: event.target.value as ModifierTarget })}><option value="price">Price</option><option value="effort">Effort</option></select>
-                    <select value={modifier.kind} onChange={(event) => updateModifier(modifier.id, { kind: event.target.value as ModifierKind })}><option value="percentage">Percent</option><option value="fixed">Fixed {modifier.target === "effort" ? "hours" : scenario.currency}</option></select>
-                    <div className="compact-input tiny"><input type="number" step="any" value={modifier.value} onChange={(event) => updateModifier(modifier.id, { value: numberValue(event.target.value) })} /><span>{modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency}</span></div>
+                    <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />
+                    <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
+                    <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
                     <button className="icon-button danger" onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
                   </div>
                 ))}
@@ -1270,46 +1550,13 @@ export default function Home() {
                 <div><span>Minimum safe price</span><strong>{currencyFormat(scenario.currency, calculation.safePrice)}</strong><small>{currencyFormat(scenario.currency, calculation.guardedProfit)} protected profit</small></div>
               </div>
               <div className="adjustment-panel">
-                <MoneyInput label="Manual price adjustment" value={scenario.manualAdjustment} onChange={(manualAdjustment) => updateScenario({ manualAdjustment })} suffix={scenario.currency} />
+                <MoneyInput label="Manual price adjustment" value={scenario.manualAdjustment} onChange={(manualAdjustment) => updateScenario({ manualAdjustment })} suffix={scenario.currency} step={50} />
                 <label className="field"><span>Reason</span><input placeholder="Required for internal traceability" value={scenario.adjustmentReason} onChange={(event) => updateScenario({ adjustmentReason: event.target.value })} /></label>
                 <div className="formula-note"><LockKeyhole size={15} /><span>Internal costs never appear in Client view or its printout.</span></div>
               </div>
             </div>
           </section>
         </>
-      )}
-
-      {view === "internal" && (
-        <aside className={"people-dock glass-panel " + (peopleOpen ? "open" : "closed") }>
-          <button className="dock-toggle" onClick={() => setPeopleOpen((open) => !open)} aria-label={peopleOpen ? "Hide people" : "Show people"}>{peopleOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
-          {peopleOpen ? (
-            <>
-              <div className="dock-heading"><div><p className="eyebrow">Talent pool</p><h3>People</h3></div><button className="icon-button accent" onClick={openNewPerson} aria-label="Add person"><Plus size={17} /></button></div>
-              <p className="dock-hint">Drag a profile into a phase. Click to edit.</p>
-              <div className="people-grid">
-                {workspace.people.map((person) => (
-                  <button
-                    key={person.id}
-                    className={"person-orb " + personTypeClass(person.type)}
-                    style={{ "--person-color": person.color } as React.CSSProperties}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData("application/x-voxe-person", person.id);
-                      event.dataTransfer.effectAllowed = "copy";
-                    }}
-                    onClick={() => { setEditingPerson(person); setIsNewPerson(false); }}
-                    title={person.name + " • " + person.role + " • " + person.type}
-                  >
-                    <span>{initials(person.name)}</span><i />
-                  </button>
-                ))}
-                <button className="person-orb add-orb" onClick={openNewPerson} title="Add employee, intern or contractor"><Plus size={22} /></button>
-              </div>
-              <div className="dock-legend"><span><i className="employee" />Employee</span><span><i className="intern" />Intern</span><span><i className="contractor" />External</span></div>
-              <div className="dock-footer"><Users size={15} /><span>{workspace.people.length} people available</span></div>
-            </>
-          ) : <Users size={20} />}
-        </aside>
       )}
 
       {editingPerson && (
@@ -1324,11 +1571,11 @@ export default function Home() {
             </div>
             <div className="form-grid">
               <label className="field"><span>Full name *</span><input required value={editingPerson.name} onChange={(event) => setEditingPerson({ ...editingPerson, name: event.target.value })} /></label>
-              <label className="field"><span>Relationship</span><select value={editingPerson.type} onChange={(event) => setEditingPerson({ ...editingPerson, type: event.target.value as PersonType })}>{["Employee", "Intern", "Contractor", "Freelancer", "Advisor"].map((type) => <option key={type}>{type}</option>)}</select></label>
+              <label className="field"><span>Relationship</span><GlassSelect ariaLabel="Relationship" value={editingPerson.type} options={["Employee", "Intern", "Contractor", "Freelancer", "Advisor"].map((type) => ({ value: type, label: type }))} onChange={(type) => setEditingPerson({ ...editingPerson, type: type as PersonType })} /></label>
               <label className="field"><span>Role *</span><input required value={editingPerson.role} onChange={(event) => setEditingPerson({ ...editingPerson, role: event.target.value })} /></label>
               <label className="field"><span>Department</span><input value={editingPerson.department} onChange={(event) => setEditingPerson({ ...editingPerson, department: event.target.value })} /></label>
               <MoneyInput label="Internal hourly cost" value={editingPerson.hourlyCost} onChange={(hourlyCost) => setEditingPerson({ ...editingPerson, hourlyCost })} suffix={scenario.currency + "/h"} min={0} />
-              <MoneyInput label="Default hours / day" value={editingPerson.defaultHours} onChange={(defaultHours) => setEditingPerson({ ...editingPerson, defaultHours })} suffix="hours" min={0} />
+              <MoneyInput label="Default hours / day" value={editingPerson.defaultHours} onChange={(defaultHours) => setEditingPerson({ ...editingPerson, defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
               <label className="field"><span>Email</span><input type="email" value={editingPerson.email} onChange={(event) => setEditingPerson({ ...editingPerson, email: event.target.value })} /></label>
               <label className="field"><span>Phone</span><input value={editingPerson.phone} onChange={(event) => setEditingPerson({ ...editingPerson, phone: event.target.value })} /></label>
               <label className="field"><span>Location</span><input value={editingPerson.location} onChange={(event) => setEditingPerson({ ...editingPerson, location: event.target.value })} /></label>
