@@ -18,10 +18,29 @@
   --red: #ff6d86;
   --glass-background: linear-gradient(145deg, rgba(39, 29, 61, 0.55), rgba(14, 10, 25, 0.48));
   --glass-shadow: 0 24px 70px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-md: 1rem;
-  --text-lg: 1.25rem;
+  --font-ui: var(--font-geist-sans), "Segoe UI", Arial, sans-serif;
+  --text-micro: 0.75rem;
+  --text-caption: 0.8125rem;
+  --text-label: 0.875rem;
+  --text-control: 1rem;
+  --text-body: 1rem;
+  --text-panel: 1rem;
+  --text-section: 1.25rem;
+  --text-metric: clamp(1.5rem, 2vw, 2rem);
+  --text-display: clamp(2rem, 5vw, 3.375rem);
+  --text-price: 1.875rem;
+  --text-xs: var(--text-caption);
+  --text-sm: var(--text-label);
+  --text-md: var(--text-body);
+  --text-lg: var(--text-section);
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-extrabold: 800;
+  --leading-tight: 1.2;
+  --leading-ui: 1.35;
+  --leading-copy: 1.5;
 }
 
 * {
@@ -60,9 +79,10 @@ body {
   margin: 0;
   background: #090611;
   color: var(--text);
-  font-family: var(--font-geist-sans), "Segoe UI", Arial, sans-serif;
-  font-size: var(--text-md);
-  line-height: 1.5;
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-copy);
   min-width: 320px;
 }
 
@@ -403,8 +423,16 @@ textarea:focus-visible {
   color: var(--muted);
   font-size: var(--text-xs);
   font-weight: 700;
+}
+
+.project-identity-copy small {
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.mini-label {
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .project-identity input {
@@ -814,6 +842,86 @@ textarea:focus-visible {
   border-radius: 22px;
 }
 
+.settings-card {
+  view-transition-name: project-settings-card;
+}
+
+.phases-card {
+  view-transition-name: delivery-plan-card;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(project-settings-card),
+::view-transition-group(delivery-plan-card),
+::view-transition-old(project-settings-card),
+::view-transition-new(project-settings-card),
+::view-transition-old(delivery-plan-card),
+::view-transition-new(delivery-plan-card) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(project-settings-card),
+::view-transition-new(project-settings-card),
+::view-transition-old(delivery-plan-card),
+::view-transition-new(delivery-plan-card) {
+  mix-blend-mode: normal;
+}
+
+.settings-card.has-maximized-panel,
+.phases-card.has-maximized-panel {
+  display: flex;
+  height: calc(100vh - 124px);
+  height: calc(100dvh - 124px);
+  min-height: 600px;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.settings-card.has-maximized-panel > .section-heading,
+.phases-card.has-maximized-panel > .section-heading {
+  flex: 0 0 auto;
+}
+
+.settings-card.has-maximized-panel .settings-layout,
+.settings-card.has-maximized-panel .settings-extensions,
+.phases-card.has-maximized-panel .delivery-workspace {
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-card.has-maximized-panel .settings-column,
+.phases-card.has-maximized-panel .people-sidebar,
+.phases-card.has-maximized-panel .phase-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-card.has-maximized-panel .settings-column {
+  overflow: auto;
+}
+
+.phases-card.has-maximized-panel .delivery-workspace {
+  align-items: stretch;
+}
+
+.phases-card.has-maximized-panel .phase-workspace {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.phases-card.has-maximized-panel .phase-table {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -881,6 +989,10 @@ textarea:focus-visible {
   gap: 14px;
 }
 
+.settings-layout.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .settings-extensions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -890,6 +1002,10 @@ textarea:focus-visible {
 
 .settings-extensions.is-single {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-card.has-maximized-panel .settings-extensions {
+  margin-top: 0;
 }
 
 .settings-column {
@@ -955,8 +1071,29 @@ textarea:focus-visible {
   font-size: var(--text-xs);
 }
 
-.settings-panel-action {
+.panel-heading-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
+}
+
+.panel-size-button {
+  margin-left: auto;
+  border-color: rgba(166, 132, 255, 0.19);
+  background: rgba(139, 98, 243, 0.075);
+  color: #bca8ee;
+}
+
+.panel-heading-actions .panel-size-button {
+  margin-left: 0;
+}
+
+.panel-size-button[aria-pressed="true"] {
+  border-color: rgba(81, 216, 182, 0.28);
+  background: rgba(81, 216, 182, 0.1);
+  color: #8ce6cf;
 }
 
 .settings-column-icon {
@@ -1515,6 +1652,21 @@ input[type="number"] {
   align-items: start;
 }
 
+.delivery-workspace.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.delivery-workspace.is-single .people-sidebar {
+  position: relative;
+  top: auto;
+  max-height: none;
+}
+
+.delivery-workspace.is-single .people-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
 .people-sidebar {
   position: sticky;
   top: 104px;
@@ -1652,6 +1804,10 @@ input[type="number"] {
 
 .phase-workspace {
   min-width: 0;
+}
+
+.phase-workspace-heading {
+  padding-inline: 2px;
 }
 
 .phase-table {
@@ -1933,6 +2089,101 @@ input[type="number"] {
   color: #8ce6cf;
   font-size: var(--text-xs);
   font-weight: 750;
+}
+
+.note-button {
+  position: relative;
+  border-color: rgba(168, 140, 255, 0.2);
+  background: rgba(132, 91, 239, 0.075);
+  color: #bba9e8;
+}
+
+.note-button:hover:not(:disabled),
+.note-button[aria-expanded="true"] {
+  border-color: rgba(168, 140, 255, 0.42);
+  background: rgba(132, 91, 239, 0.16);
+  color: #dacfff;
+}
+
+.note-button.has-notes {
+  border-color: rgba(81, 216, 182, 0.3);
+  background: rgba(81, 216, 182, 0.1);
+  color: #91e7d2;
+}
+
+.note-button.has-notes::after {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(81, 216, 182, 0.8);
+  content: "";
+}
+
+.row-notes-editor {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(168, 140, 255, 0.17);
+  border-radius: 13px;
+  flex: 1 1 100%;
+  gap: 7px;
+  background: linear-gradient(145deg, rgba(114, 77, 205, 0.09), rgba(7, 5, 13, 0.22));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  animation: row-notes-enter 180ms ease-out;
+}
+
+.row-notes-editor label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-strong);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.row-notes-editor label svg {
+  color: var(--violet-bright);
+}
+
+.row-notes-editor textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(7, 5, 12, 0.34);
+  color: var(--text);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-copy);
+}
+
+.row-notes-editor textarea::placeholder {
+  color: #958ba3;
+  opacity: 1;
+}
+
+.row-notes-editor textarea:focus {
+  border-color: rgba(168, 140, 255, 0.48);
+  box-shadow: 0 0 0 3px rgba(139, 98, 243, 0.09);
+}
+
+.row-notes-editor small {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: var(--leading-copy);
+}
+
+@keyframes row-notes-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .empty-inline {
@@ -2565,77 +2816,224 @@ input[type="number"] {
   letter-spacing: 0.08em;
 }
 
-/* Readable interface scale */
+/* Unified interface typography */
 .eyebrow,
+.section-heading .section-kicker,
 .phase-table-head,
 .client-phase-head {
-  font-size: var(--text-xs) !important;
+  font-size: var(--text-caption) !important;
+  font-weight: var(--weight-bold) !important;
+  line-height: var(--leading-ui);
+  letter-spacing: 0.1em !important;
+}
+
+.section-heading h2,
+.modal-heading h2 {
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+}
+
+.settings-column-heading h3,
+.dock-heading h3,
+.people-sidebar .dock-heading h3 {
+  font-size: var(--text-panel);
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
 }
 
 .project-identity-copy small,
 .mini-label,
 .field > span,
-.color-picker > span,
-.metric-card small,
-.phase-name-cell b,
-.phase-date,
-.client-price span,
-.client-price small,
-.client-phase small,
-.client-footer,
-.holiday-chips small,
-.margin-ring span,
-.margin-visual > div:last-child span,
-.margin-visual > div:last-child small {
-  font-size: var(--text-xs);
+.color-picker > span {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
 }
 
-.metric-card span,
-.warning-strip strong,
-.warning-strip span,
-.section-heading > div > p:last-child:not(.eyebrow),
-.holiday-chips button,
-.phase-row > strong,
-.empty-state span,
-.empty-inline,
-.safety-badge,
-.formula-note,
-.modal-heading > div > p:last-child:not(.eyebrow),
-.person-picker span,
-.export-choice small,
-.export-note,
-.client-metrics > div,
-.client-phase b {
-  font-size: 0.8125rem;
+.field :is(input, select, textarea),
+.glass-select-trigger,
+.glass-select-option,
+.number-stepper input,
+.phase-name-cell input,
+.phase-row select,
+.data-row select,
+.data-row > input,
+.holiday-add input {
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+.phase-name-cell input,
+.data-row .row-name {
+  font-weight: var(--weight-semibold);
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: #958ba3;
+  opacity: 1;
 }
 
 .button,
 .view-toggle button,
-.field input,
-.field textarea,
-.glass-select-trigger,
-.number-stepper input,
-.phase-name-cell input,
-.data-row .row-name,
+.privacy-switch-copy strong,
+.day-selector button,
+.glass-calendar-footer button,
+.holiday-chips button,
+.add-person-button,
+.add-person-card,
+.person-picker .new-person-picker {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.number-stepper em,
+.settings-column-heading small,
+.metric-card small,
+.phase-name-cell b,
+.phase-date,
+.assignment-zone > small,
+.holiday-chips small,
+.modifier-target-chip,
+.dock-footer,
+.modal-heading > div > p:last-child:not(.eyebrow),
+.person-picker span,
+.export-choice small,
+.export-note,
+.client-price span,
+.client-price small,
+.client-phase small,
+.client-footer,
+.margin-ring span,
+.margin-visual > div:last-child span,
+.margin-visual > div:last-child small {
+  font-size: var(--text-caption);
+  line-height: var(--leading-copy);
+}
+
+.metric-card span,
+.section-heading > div > p:last-child:not(.eyebrow),
+.pricing-hidden-state strong,
+.pricing-hidden-state span,
+.warning-strip strong,
+.warning-strip span,
+.dock-hint,
+.empty-state strong,
+.empty-state span,
+.empty-inline,
+.formula-note,
+.reveal-pricing-message strong,
+.reveal-pricing-message p,
+.planning-print-note,
+.client-metrics > div,
+.client-phase strong,
+.client-phase > span,
+.person-picker strong,
+.export-choice strong,
+.toast {
+  font-size: var(--text-label);
+  line-height: var(--leading-copy);
+}
+
+.metric-card span,
+.pricing-hidden-state strong,
+.warning-strip strong,
+.empty-state strong,
+.reveal-pricing-message strong,
+.planning-print-note,
+.person-picker strong,
+.export-choice strong,
+.toast {
+  font-weight: var(--weight-semibold);
+}
+
+.glass-calendar-header strong {
+  font-size: var(--text-control);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-ui);
+}
+
+.glass-calendar-weekdays span {
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+}
+
+.glass-calendar-day {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+}
+
+.person-card-copy strong,
+.phase-row > strong,
 .data-row > strong,
 .breakdown-list span,
 .breakdown-list strong,
-.person-picker strong,
-.person-picker .new-person-picker,
-.export-choice strong,
-.toast,
-.client-phase strong,
-.client-phase > span {
-  font-size: var(--text-sm);
+.safety-badge,
+.client-phase b {
+  font-size: var(--text-label);
 }
 
-.project-identity input {
-  font-size: var(--text-md);
+.person-card-copy strong,
+.data-row > strong,
+.breakdown-list strong,
+.safety-badge {
+  font-weight: var(--weight-semibold);
 }
 
-.section-heading h2,
-.modal-heading h2 {
-  font-size: 1.25rem;
+.person-card-copy small {
+  font-size: var(--text-caption);
+}
+
+.person-card-copy em {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-bold);
+}
+
+.modifier-target-chip,
+.breakdown-list .total span {
+  font-weight: var(--weight-semibold);
+}
+
+.project-identity input,
+.breakdown-list .total span,
+.breakdown-list .total strong,
+.margin-visual > div:last-child strong {
+  font-size: var(--text-body);
+}
+
+.project-identity input,
+.breakdown-list .total strong,
+.margin-visual > div:last-child strong {
+  font-weight: var(--weight-bold);
+}
+
+.client-hero > div:first-child > p:last-child {
+  font-size: var(--text-body);
+  line-height: 1.65;
+}
+
+.metric-card strong {
+  font-size: var(--text-metric);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+}
+
+.client-hero h1 {
+  font-size: var(--text-display);
+  font-weight: var(--weight-bold);
+}
+
+.client-price strong {
+  font-size: var(--text-price);
+  font-weight: var(--weight-bold);
+}
+
+.margin-ring strong {
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
 }
 
 .button {
@@ -2649,46 +3047,33 @@ input[type="number"] {
 }
 
 .field input,
+.field select,
 .field textarea,
 .glass-select-trigger,
+.glass-select-option,
 .holiday-add input {
-  min-height: 42px;
-}
-
-.metric-card strong {
-  font-size: clamp(1.5rem, 2vw, 2rem);
+  min-height: 44px;
 }
 
 .metric-card small {
   white-space: normal;
 }
 
-.field > span,
-.color-picker > span {
-  font-weight: 700;
-}
-
 .day-selector button {
   width: 100%;
-  height: 38px;
-  font-size: 0.8125rem;
-}
-
-.phase-name-cell input {
-  font-weight: 700;
+  height: 40px;
 }
 
 .assignment-zone > small {
   position: static;
   padding: 0 6px;
   color: #a79db4;
-  font-size: var(--text-xs);
 }
 
 .assignment-pill i {
   width: 29px;
   height: 29px;
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
 }
 
 .assignment-pill > button {
@@ -2697,9 +3082,10 @@ input[type="number"] {
 }
 
 .add-person-button {
-  height: 34px;
+  height: 36px;
   padding: 0 10px;
-  font-size: var(--text-xs);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
 }
 
 .data-row {
@@ -2709,11 +3095,24 @@ input[type="number"] {
 
 .data-row .row-name {
   min-width: 150px;
+  min-height: 44px;
 }
 
 .data-row > .number-stepper {
   width: 158px;
+  min-height: 44px;
   flex: 0 0 158px;
+}
+
+.data-row > .modifier-target-chip,
+.data-row > .icon-button,
+.settings-subpanel .data-row > strong {
+  min-height: 44px;
+}
+
+.data-row > .icon-button {
+  width: 44px;
+  height: 44px;
 }
 
 .data-row > .glass-select-trigger {
@@ -2731,15 +3130,6 @@ input[type="number"] {
   flex-basis: 138px;
 }
 
-.breakdown-list .total span,
-.breakdown-list .total strong {
-  font-size: var(--text-md);
-}
-
-.margin-visual > div:last-child strong {
-  font-size: 1.0625rem;
-}
-
 .person-picker > button {
   min-height: 58px;
 }
@@ -2747,11 +3137,7 @@ input[type="number"] {
 .person-picker > button > i {
   width: 40px;
   height: 40px;
-  font-size: var(--text-xs);
-}
-
-.client-price strong {
-  font-size: 1.875rem;
+  font-size: var(--text-caption);
 }
 
 .client-metrics > div {
@@ -2761,7 +3147,7 @@ input[type="number"] {
 .mini-avatar-stack i {
   width: 34px;
   height: 34px;
-  font-size: 0.625rem;
+  font-size: var(--text-micro);
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -2781,7 +3167,8 @@ input[type="number"] {
   .backdrop-glow::before,
   .backdrop-glow::after,
   .glass-select-menu,
-  .glass-date-menu {
+  .glass-date-menu,
+  .row-notes-editor {
     animation: none;
   }
 
@@ -2872,6 +3259,13 @@ input[type="number"] {
 }
 
 @media (max-width: 900px) {
+  .settings-card.has-maximized-panel,
+  .phases-card.has-maximized-panel {
+    height: calc(100vh - 24px);
+    height: calc(100dvh - 24px);
+    min-height: 520px;
+  }
+
   .app-shell {
     padding: 12px 12px 70px;
   }

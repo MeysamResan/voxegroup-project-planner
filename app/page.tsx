@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   AlertTriangle,
   ArrowDownToLine,
@@ -29,7 +29,10 @@ import {
   GripVertical,
   Info,
   LockKeyhole,
+  Maximize2,
+  MessageSquareText,
   Minus,
+  Minimize2,
   Plus,
   Printer,
   Sparkles,
@@ -49,6 +52,8 @@ type ExpenseBilling = "internal" | "pass_through" | "markup";
 type ModifierTarget = "effort" | "price";
 type ModifierKind = "percentage" | "fixed";
 type ViewMode = "internal" | "client";
+type ProjectSettingsPanel = "commercial" | "schedule" | "modifiers" | "expenses";
+type DeliveryPanel = "people" | "phases";
 
 type Person = {
   id: string;
@@ -82,6 +87,7 @@ type Phase = {
 type Expense = {
   id: string;
   name: string;
+  notes: string;
   amount: number;
   unit: ExpenseUnit;
   billing: ExpenseBilling;
@@ -91,6 +97,7 @@ type Expense = {
 type Modifier = {
   id: string;
   name: string;
+  notes: string;
   kind: ModifierKind;
   target: ModifierTarget;
   value: number;
@@ -114,7 +121,7 @@ type ProjectPlan = {
 
 type Workspace = {
   app: "voxe-pricing-studio";
-  schemaVersion: 3;
+  schemaVersion: 4;
   people: Person[];
   project: ProjectPlan;
 };
@@ -193,7 +200,7 @@ const initialWorkspace = (): Workspace => {
 
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 3,
+    schemaVersion: 4,
     people: [designer, developer, qa, aiContractor],
     project: {
         projectName: "Customer Operations Platform",
@@ -250,6 +257,7 @@ const initialWorkspace = (): Workspace => {
           {
             id: uid(),
             name: "Cloud development environment",
+            notes: "",
             amount: 240,
             unit: "fixed",
             billing: "internal",
@@ -258,6 +266,7 @@ const initialWorkspace = (): Workspace => {
           {
             id: uid(),
             name: "AI sandbox usage",
+            notes: "",
             amount: 1.25,
             unit: "person_hour",
             billing: "markup",
@@ -265,8 +274,8 @@ const initialWorkspace = (): Workspace => {
           },
         ],
         modifiers: [
-          { id: uid(), name: "AI integration complexity", kind: "percentage", target: "price", value: 12 },
-          { id: uid(), name: "Delivery contingency", kind: "percentage", target: "effort", value: 8 },
+          { id: uid(), name: "AI integration complexity", notes: "", kind: "percentage", target: "price", value: 12 },
+          { id: uid(), name: "Delivery contingency", notes: "", kind: "percentage", target: "effort", value: 8 },
         ],
         manualAdjustment: 0,
         adjustmentReason: "",
@@ -543,6 +552,14 @@ const normalizeProjectPlan = (value: unknown): ProjectPlan | null => {
       : 0;
 
   project.baseHourlyPrice = Number.isFinite(baseHourlyPrice) ? baseHourlyPrice : 0;
+  project.expenses = (project.expenses as Array<Expense & { notes?: unknown }>).map((expense) => ({
+    ...expense,
+    notes: typeof expense.notes === "string" ? expense.notes : "",
+  }));
+  project.modifiers = (project.modifiers as Array<Modifier & { notes?: unknown }>).map((modifier) => ({
+    ...modifier,
+    notes: typeof modifier.notes === "string" ? modifier.notes : "",
+  }));
   delete project.clientRate;
   delete project.targetMargin;
   delete project.riskReserve;
@@ -579,7 +596,7 @@ const normalizeWorkspace = (value: unknown): Workspace | null => {
 
   return {
     app: "voxe-pricing-studio",
-    schemaVersion: 3,
+    schemaVersion: 4,
     people: candidate.people as Person[],
     project,
   };
@@ -1499,6 +1516,56 @@ function MoneyInput({
   );
 }
 
+function runPanelViewTransition(update: () => void) {
+  if (
+    typeof document === "undefined" ||
+    typeof window === "undefined" ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    update();
+    return;
+  }
+
+  const transitionDocument = document as Document & {
+    startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+  };
+  if (!transitionDocument.startViewTransition) {
+    update();
+    return;
+  }
+
+  try {
+    const transition = transitionDocument.startViewTransition(() => flushSync(update));
+    void transition.finished.catch(() => undefined);
+  } catch {
+    update();
+  }
+}
+
+function PanelSizeButton({
+  label,
+  maximized,
+  onToggle,
+}: {
+  label: string;
+  maximized: boolean;
+  onToggle: () => void;
+}) {
+  const action = maximized ? "Minimize" : "Maximize";
+  return (
+    <button
+      type="button"
+      className="icon-button panel-size-button"
+      aria-label={`${action} ${label}`}
+      aria-pressed={maximized}
+      title={`${action} ${label}`}
+      onClick={onToggle}
+    >
+      {maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+    </button>
+  );
+}
+
 export default function Home() {
   const [workspace, setWorkspace] = useState<Workspace>(() => initialWorkspace());
   const [hydrated, setHydrated] = useState(false);
@@ -1508,6 +1575,9 @@ export default function Home() {
   const [isNewPerson, setIsNewPerson] = useState(false);
   const [phasePickerId, setPhasePickerId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
+  const [maximizedProjectPanel, setMaximizedProjectPanel] = useState<ProjectSettingsPanel | null>(null);
+  const [maximizedDeliveryPanel, setMaximizedDeliveryPanel] = useState<DeliveryPanel | null>(null);
+  const [openNotesKey, setOpenNotesKey] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [revealPricingOpen, setRevealPricingOpen] = useState(false);
   const [toast, setToast] = useState("");
@@ -1527,6 +1597,12 @@ export default function Home() {
   const visibleModifiers = planningMode
     ? scenario.modifiers.filter((modifier) => modifier.target === "effort")
     : scenario.modifiers;
+  const showCommercialPanel = maximizedProjectPanel === null || maximizedProjectPanel === "commercial";
+  const showSchedulePanel = maximizedProjectPanel === null || maximizedProjectPanel === "schedule";
+  const showModifiersPanel = maximizedProjectPanel === null || maximizedProjectPanel === "modifiers";
+  const showExpensesPanel = !planningMode && (maximizedProjectPanel === null || maximizedProjectPanel === "expenses");
+  const showPeoplePanel = maximizedDeliveryPanel === null || maximizedDeliveryPanel === "people";
+  const showPhasesPanel = maximizedDeliveryPanel === null || maximizedDeliveryPanel === "phases";
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -1682,7 +1758,7 @@ export default function Home() {
     updateScenario({
       expenses: [
         ...scenario.expenses,
-        { id: uid(), name: "New expense", amount: 0, unit: "fixed", billing: "internal", markup: 0 },
+        { id: uid(), name: "New expense", notes: "", amount: 0, unit: "fixed", billing: "internal", markup: 0 },
       ],
     });
   };
@@ -1699,7 +1775,14 @@ export default function Home() {
     updateScenario({
       modifiers: [
         ...scenario.modifiers,
-        { id: uid(), name: planningMode ? "New effort adjustment" : "New modifier", kind: "percentage", target: planningMode ? "effort" : "price", value: 0 },
+        {
+          id: uid(),
+          name: planningMode ? "New effort adjustment" : "New modifier",
+          notes: "",
+          kind: planningMode ? "percentage" : "fixed",
+          target: planningMode ? "effort" : "price",
+          value: 0,
+        },
       ],
     });
   };
@@ -1737,12 +1820,14 @@ export default function Home() {
       return;
     }
     setPlanningMode(true);
+    setMaximizedProjectPanel(null);
     setExportOpen(false);
     setToast("Planning mode on — pricing hidden");
   };
 
   const revealPricing = () => {
     setPlanningMode(false);
+    setMaximizedProjectPanel(null);
     setRevealPricingOpen(false);
     setToast("Planning mode off — pricing restored");
   };
@@ -1939,15 +2024,18 @@ export default function Home() {
             </section>
           )}
 
-          <section className="settings-card glass-panel">
+          <section className={"settings-card glass-panel" + (maximizedProjectPanel ? " has-maximized-panel" : "")}>
             <div className="section-heading">
-              <div className="section-title-block"><h2 className="eyebrow section-kicker">Project settings</h2></div>
+              <div className="section-title-block"><h2>Project settings</h2></div>
             </div>
-            <div className="settings-layout">
+            {(showCommercialPanel || showSchedulePanel) && (
+            <div className={"settings-layout" + (maximizedProjectPanel ? " is-single" : "")}>
+              {showCommercialPanel && (
               <section className="settings-column commercial-settings" aria-labelledby="commercial-settings-title">
                 <div className="settings-column-heading">
                   <span className="settings-column-icon commercial" aria-hidden="true"><CircleDollarSign size={18} /></span>
                   <div><h3 id="commercial-settings-title">Commercial</h3><small>Base pricing and project fees</small></div>
+                  <PanelSizeButton label="Commercial" maximized={maximizedProjectPanel === "commercial"} onToggle={() => runPanelViewTransition(() => setMaximizedProjectPanel((current) => current === "commercial" ? null : "commercial"))} />
                 </div>
                 {planningMode ? (
                   <div className="pricing-hidden-state">
@@ -1975,11 +2063,14 @@ export default function Home() {
                   </div>
                 )}
               </section>
+              )}
 
+              {showSchedulePanel && (
               <section className="settings-column schedule-settings" aria-labelledby="schedule-settings-title">
                 <div className="settings-column-heading">
                   <span className="settings-column-icon schedule" aria-hidden="true"><CalendarDays size={18} /></span>
                   <div><h3 id="schedule-settings-title">Schedule & time</h3><small>Dates, capacity and working calendar</small></div>
+                  <PanelSizeButton label="Schedule and time" maximized={maximizedProjectPanel === "schedule"} onToggle={() => runPanelViewTransition(() => setMaximizedProjectPanel((current) => current === "schedule" ? null : "schedule"))} />
                 </div>
                 <div className="settings-panel-grid schedule-primary-grid">
                   <MoneyInput label="Default hours / day" value={scenario.defaultHours} onChange={(defaultHours) => updateScenario({ defaultHours })} suffix="hours" min={0} max={24} step={0.5} />
@@ -2046,9 +2137,13 @@ export default function Home() {
                   </div>
                 </div>
               </section>
+              )}
             </div>
+            )}
 
-            <div className={"settings-extensions" + (planningMode ? " is-single" : "")}>
+            {(showModifiersPanel || showExpensesPanel) && (
+            <div className={"settings-extensions" + (planningMode || maximizedProjectPanel ? " is-single" : "")}>
+              {showModifiersPanel && (
               <section className="settings-column settings-subpanel modifier-settings" aria-labelledby="modifiers-settings-title">
                 <div className="settings-column-heading">
                   <span className="settings-column-icon schedule" aria-hidden="true"><Sparkles size={18} /></span>
@@ -2056,34 +2151,76 @@ export default function Home() {
                     <h3 id="modifiers-settings-title">{planningMode ? "Effort adjustments" : "Modifiers"}</h3>
                     <small>{planningMode ? "Adjust delivery effort without exposing price" : "Price and effort adjustments"}</small>
                   </div>
-                  <button type="button" className="icon-button accent settings-panel-action" aria-label={planningMode ? "Add effort adjustment" : "Add modifier"} onClick={addModifier}><Plus size={17} /></button>
+                  <span className="panel-heading-actions">
+                    <button type="button" className="icon-button accent" aria-label={planningMode ? "Add effort adjustment" : "Add modifier"} onClick={addModifier}><Plus size={17} /></button>
+                    <PanelSizeButton label={planningMode ? "Effort adjustments" : "Modifiers"} maximized={maximizedProjectPanel === "modifiers"} onToggle={() => runPanelViewTransition(() => setMaximizedProjectPanel((current) => current === "modifiers" ? null : "modifiers"))} />
+                  </span>
                 </div>
                 <div className="data-list">
-                  {visibleModifiers.map((modifier) => (
-                    <div className="data-row modifier-row" key={modifier.id}>
-                      <input className="row-name" aria-label={modifier.name + " name"} value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
-                      {planningMode
-                        ? <span className="modifier-target-chip"><Clock3 size={13} /> Effort</span>
-                        : <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />}
-                      <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
-                      <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
-                      <button type="button" className="icon-button danger" aria-label={"Remove " + modifier.name} onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
-                    </div>
-                  ))}
+                  {visibleModifiers.map((modifier) => {
+                    const notesKey = `modifier:${modifier.id}`;
+                    const notesEditorId = `modifier-notes-${encodeURIComponent(modifier.id)}`;
+                    const notesInputId = `${notesEditorId}-input`;
+                    const hasNotes = Boolean(modifier.notes.trim());
+                    return (
+                      <div className="data-row modifier-row" key={modifier.id}>
+                        <input className="row-name" aria-label={modifier.name + " name"} value={modifier.name} onChange={(event) => updateModifier(modifier.id, { name: event.target.value })} />
+                        {planningMode
+                          ? <span className="modifier-target-chip"><Clock3 size={13} /> Effort</span>
+                          : <GlassSelect ariaLabel={modifier.name + " target"} value={modifier.target} options={[{ value: "price", label: "Price" }, { value: "effort", label: "Effort" }]} onChange={(target) => updateModifier(modifier.id, { target: target as ModifierTarget })} />}
+                        <GlassSelect ariaLabel={modifier.name + " type"} value={modifier.kind} options={[{ value: "percentage", label: "Percent" }, { value: "fixed", label: "Fixed " + (modifier.target === "effort" ? "hours" : scenario.currency) }]} onChange={(kind) => updateModifier(modifier.id, { kind: kind as ModifierKind })} />
+                        <NumberStepper compact ariaLabel={modifier.name + " value"} value={modifier.value} step={1} suffix={modifier.kind === "percentage" ? "%" : modifier.target === "effort" ? "h" : scenario.currency} onChange={(value) => updateModifier(modifier.id, { value })} />
+                        <button
+                          type="button"
+                          className={"icon-button note-button" + (hasNotes ? " has-notes" : "")}
+                          aria-label={`${hasNotes ? "Edit" : "Add"} AI notes for ${modifier.name || "modifier"}`}
+                          aria-expanded={openNotesKey === notesKey}
+                          aria-controls={notesEditorId}
+                          title="Notes for AI"
+                          onClick={() => setOpenNotesKey((current) => current === notesKey ? null : notesKey)}
+                        >
+                          <MessageSquareText size={15} />
+                        </button>
+                        <button type="button" className="icon-button danger" aria-label={"Remove " + modifier.name} onClick={() => updateScenario({ modifiers: scenario.modifiers.filter((item) => item.id !== modifier.id) })}><Trash2 size={14} /></button>
+                        {openNotesKey === notesKey && (
+                          <div className="row-notes-editor" id={notesEditorId}>
+                            <label htmlFor={notesInputId}><Sparkles size={14} /> Notes for future AI</label>
+                            <textarea
+                              id={notesInputId}
+                              autoFocus
+                              rows={3}
+                              value={modifier.notes}
+                              placeholder="Explain why this modifier exists, what assumption it represents, and when it should apply."
+                              onChange={(event) => updateModifier(modifier.id, { notes: event.target.value })}
+                            />
+                            <small>Saved with this project and included in JSON for future AI feedback.</small>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {!visibleModifiers.length && <div className="empty-inline">{planningMode ? "No effort adjustments" : "No price or effort modifiers"}</div>}
                 </div>
               </section>
+              )}
 
-              {!planningMode && (
+              {showExpensesPanel && (
                 <section className="settings-column settings-subpanel expense-settings" aria-labelledby="expenses-settings-title">
                   <div className="settings-column-heading">
                     <span className="settings-column-icon commercial" aria-hidden="true"><WalletCards size={18} /></span>
                     <div><h3 id="expenses-settings-title">Expenses</h3><small>Internal, pass-through and marked-up costs</small></div>
-                    <button type="button" className="icon-button accent settings-panel-action" aria-label="Add expense" onClick={addExpense}><Plus size={17} /></button>
+                    <span className="panel-heading-actions">
+                      <button type="button" className="icon-button accent" aria-label="Add expense" onClick={addExpense}><Plus size={17} /></button>
+                      <PanelSizeButton label="Expenses" maximized={maximizedProjectPanel === "expenses"} onToggle={() => runPanelViewTransition(() => setMaximizedProjectPanel((current) => current === "expenses" ? null : "expenses"))} />
+                    </span>
                   </div>
                   <div className="data-list">
                     {scenario.expenses.map((expense) => {
                       const result = expenseResult(expense.id);
+                      const notesKey = `expense:${expense.id}`;
+                      const notesEditorId = `expense-notes-${encodeURIComponent(expense.id)}`;
+                      const notesInputId = `${notesEditorId}-input`;
+                      const hasNotes = Boolean(expense.notes.trim());
                       return (
                         <div className="data-row expense-row" key={expense.id}>
                           <input className="row-name" aria-label={expense.name + " name"} value={expense.name} onChange={(event) => updateExpense(expense.id, { name: event.target.value })} />
@@ -2092,7 +2229,32 @@ export default function Home() {
                           <GlassSelect ariaLabel={expense.name + " billing"} value={expense.billing} options={Object.entries(billingLabels).map(([value, label]) => ({ value, label }))} onChange={(billing) => updateExpense(expense.id, { billing: billing as ExpenseBilling })} />
                           {expense.billing === "markup" && <NumberStepper compact ariaLabel={expense.name + " markup"} value={expense.markup} min={0} step={1} suffix="%" onChange={(markup) => updateExpense(expense.id, { markup })} />}
                           <strong>{currencyFormat(scenario.currency, result?.cost ?? 0)}</strong>
+                          <button
+                            type="button"
+                            className={"icon-button note-button" + (hasNotes ? " has-notes" : "")}
+                            aria-label={`${hasNotes ? "Edit" : "Add"} AI notes for ${expense.name || "expense"}`}
+                            aria-expanded={openNotesKey === notesKey}
+                            aria-controls={notesEditorId}
+                            title="Notes for AI"
+                            onClick={() => setOpenNotesKey((current) => current === notesKey ? null : notesKey)}
+                          >
+                            <MessageSquareText size={15} />
+                          </button>
                           <button type="button" className="icon-button danger" aria-label={"Remove " + expense.name} onClick={() => updateScenario({ expenses: scenario.expenses.filter((item) => item.id !== expense.id) })}><Trash2 size={14} /></button>
+                          {openNotesKey === notesKey && (
+                            <div className="row-notes-editor" id={notesEditorId}>
+                              <label htmlFor={notesInputId}><Sparkles size={14} /> Notes for future AI</label>
+                              <textarea
+                                id={notesInputId}
+                                autoFocus
+                                rows={3}
+                                value={expense.notes}
+                                placeholder="Explain why this expense is needed, how it was estimated, and any assumptions behind it."
+                                onChange={(event) => updateExpense(expense.id, { notes: event.target.value })}
+                              />
+                              <small>Saved with this project and included in JSON for future AI feedback.</small>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2101,20 +2263,25 @@ export default function Home() {
                 </section>
               )}
             </div>
+            )}
           </section>
 
-          <section className="phases-card glass-panel">
+          <section className={"phases-card glass-panel" + (maximizedDeliveryPanel ? " has-maximized-panel" : "")}>
             <div className="section-heading">
               <div className="section-title-block"><p className="eyebrow section-kicker">Delivery plan</p><h2>Phases & staffing</h2><p>Build the team and delivery plan together in one workspace.</p></div>
-              <button className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>
+              {showPhasesPanel && <button type="button" className="button primary" onClick={addPhase}><Plus size={16} /> Add phase</button>}
             </div>
-            <div className="delivery-workspace">
+            <div className={"delivery-workspace" + (maximizedDeliveryPanel ? " is-single" : "")}>
+              {showPeoplePanel && (
               <aside className="people-sidebar" aria-label="People sidebar">
                 <div className="dock-heading">
                   <div><p className="eyebrow">Talent pool</p><h3>People</h3></div>
-                  <button className="icon-button accent" onClick={openNewPerson} aria-label="Add person"><Plus size={17} /></button>
+                  <span className="panel-heading-actions">
+                    <button type="button" className="icon-button accent" onClick={openNewPerson} aria-label="Add person"><Plus size={17} /></button>
+                    <PanelSizeButton label="People" maximized={maximizedDeliveryPanel === "people"} onToggle={() => runPanelViewTransition(() => { setMaximizedDeliveryPanel((current) => current === "people" ? null : "people"); setDragOverPhase(null); })} />
+                  </span>
                 </div>
-                <p className="dock-hint">Drag a person into a phase, or click a profile to edit it.</p>
+                <p className="dock-hint">{maximizedDeliveryPanel === "people" ? "Click a profile to edit its planning and team details." : "Drag a person into a phase, or click a profile to edit it."}</p>
                 <div className="people-list">
                   {workspace.people.map((person) => (
                     <button
@@ -2139,8 +2306,15 @@ export default function Home() {
                 </div>
                 <div className="dock-footer"><Users size={17} /><span>{workspace.people.length} people available</span></div>
               </aside>
+              )}
 
-              <div className="phase-workspace">
+              {showPhasesPanel && (
+              <section className="phase-workspace" aria-labelledby="phases-panel-title">
+                <div className="settings-column-heading phase-workspace-heading">
+                  <span className="settings-column-icon schedule" aria-hidden="true"><BriefcaseBusiness size={18} /></span>
+                  <div><h3 id="phases-panel-title">Phases</h3><small>Schedule, staffing and delivery effort</small></div>
+                  <PanelSizeButton label="Phases" maximized={maximizedDeliveryPanel === "phases"} onToggle={() => runPanelViewTransition(() => { setMaximizedDeliveryPanel((current) => current === "phases" ? null : "phases"); setDragOverPhase(null); })} />
+                </div>
                 <div className={"phase-table " + (planningMode ? "planning-phase-table" : "")}>
               <div className="phase-table-head">
                 <span>Phase</span><span>Schedule</span><span>Workdays</span><span>Assigned people</span><span>Hours</span>{!planningMode && <span>Cost</span>}<span />
@@ -2199,7 +2373,8 @@ export default function Home() {
               })}
               {!scenario.phases.length && <div className="empty-state"><CalendarDays size={24} /><strong>No delivery phases yet</strong><span>Add the first phase to begin the estimate.</span></div>}
                 </div>
-              </div>
+              </section>
+              )}
             </div>
           </section>
 
