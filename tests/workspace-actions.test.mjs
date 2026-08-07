@@ -56,6 +56,23 @@ test("entity updates cannot change stable IDs", () => {
   assert.equal(updated.project.phases[0].name, "Renamed phase");
 });
 
+test("workspace replacement restores a fresh built-in preset", () => {
+  const preset = initialWorkspace();
+  const edited = workspaceReducer(
+    preset,
+    workspaceActions.patchProject({ projectName: "Temporary session project" }),
+  );
+  const restoredPreset = initialWorkspace();
+  const reset = workspaceReducer(
+    edited,
+    workspaceActions.replaceWorkspace(restoredPreset),
+  );
+
+  assert.equal(reset, restoredPreset);
+  assert.deepEqual(reset, initialWorkspace());
+  assert.equal(reset.project.projectName, "Customer Operations Platform");
+});
+
 test("new phase, expense, and modifier defaults stay consistent", () => {
   let workspace = initialWorkspace();
   workspace = workspaceReducer(workspace, workspaceActions.addPhase());

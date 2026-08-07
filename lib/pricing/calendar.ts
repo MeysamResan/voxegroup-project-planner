@@ -1,4 +1,4 @@
-import { DEFAULT_START_DATE, DEFAULT_WORKING_DAYS } from "./constants.ts";
+import { DEFAULT_START_DATE } from "./constants.ts";
 
 export const dateFromString = (value: string): Date => {
   const date = new Date(value + "T12:00:00");
@@ -23,12 +23,14 @@ export const workDateAtOffset = (
   offset: number,
   workingDays: number[],
   holidays: string[],
-): Date => {
-  const activeDays = workingDays.length ? workingDays : [...DEFAULT_WORKING_DAYS];
+): Date | null => {
+  if (!workingDays.length) return null;
+
+  const activeDays = new Set(workingDays);
   const holidaySet = new Set(holidays);
   let current = dateFromString(startValue);
   let guard = 0;
-  const isWorking = (date: Date) => activeDays.includes(date.getDay()) && !holidaySet.has(dateKey(date));
+  const isWorking = (date: Date) => activeDays.has(date.getDay()) && !holidaySet.has(dateKey(date));
 
   while (!isWorking(current) && guard < 370) {
     current = addDays(current, 1);

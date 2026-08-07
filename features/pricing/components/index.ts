@@ -5,5 +5,5 @@ export * from "./OverviewMetrics";
 export * from "./PersonEditorDialog";
 export * from "./PhasesStaffing";
 export * from "./ProjectSettings";
-export * from "./RevealPricingDialog";
+export * from "./ResetWorkspaceDialog";
 export * from "./Topbar";

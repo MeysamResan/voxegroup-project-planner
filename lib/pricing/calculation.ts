@@ -7,6 +7,15 @@ export function calculateScenario(
 ): ScenarioCalculation {
   const personMap = new Map(people.map((person) => [person.id, person]));
   const defaultHours = Math.max(0, scenario.defaultHours);
+  const scheduledDateKey = (offset: number): string => {
+    const date = workDateAtOffset(
+      scenario.startDate,
+      offset,
+      scenario.workingDays,
+      scenario.holidays,
+    );
+    return date ? dateKey(date) : "";
+  };
   let workingOffset = 0;
   const rawPhaseData = new Map<
     string,
@@ -20,17 +29,8 @@ export function calculateScenario(
       const person = personMap.get(assignment.personId);
       return sum + days * defaultHours * Math.max(0, person?.hourlyCost ?? 0);
     }, 0);
-    const start = dateKey(
-      workDateAtOffset(scenario.startDate, workingOffset, scenario.workingDays, scenario.holidays),
-    );
-    const end = dateKey(
-      workDateAtOffset(
-        scenario.startDate,
-        workingOffset + Math.max(0, days - 1),
-        scenario.workingDays,
-        scenario.holidays,
-      ),
-    );
+    const start = scheduledDateKey(workingOffset);
+    const end = scheduledDateKey(workingOffset + Math.max(0, days - 1));
     rawPhaseData.set(phase.id, { rawHours, rawCost, start, end });
     workingOffset += days;
   });
@@ -85,18 +85,9 @@ export function calculateScenario(
   });
 
   const totalWorkingDays = workingOffset;
-  const projectStart = dateKey(
-    workDateAtOffset(scenario.startDate, 0, scenario.workingDays, scenario.holidays),
-  );
-  const projectEnd = dateKey(
-    workDateAtOffset(
-      scenario.startDate,
-      Math.max(0, totalWorkingDays - 1),
-      scenario.workingDays,
-      scenario.holidays,
-    ),
-  );
-  const calendarDays = totalWorkingDays
+  const projectStart = scheduledDateKey(0);
+  const projectEnd = scheduledDateKey(Math.max(0, totalWorkingDays - 1));
+  const calendarDays = totalWorkingDays && projectStart && projectEnd
     ? Math.max(
         1,
         Math.round(

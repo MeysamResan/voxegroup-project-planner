@@ -3,20 +3,28 @@
 import { useRef, type ChangeEvent } from "react";
 import {
   ArrowDownToLine,
-  BriefcaseBusiness,
   Eye,
   EyeOff,
+  RotateCcw,
   Upload,
 } from "lucide-react";
 
 import {
   Button,
   SegmentedControl,
-  Switch,
   TextInput,
   type SegmentedControlOption,
 } from "@/components/ui";
 import type { ViewMode } from "@/lib/pricing/types.ts";
+
+type PricingVisibilityMode = "planning" | "pricing";
+
+const PRICING_VISIBILITY_OPTIONS: ReadonlyArray<
+  SegmentedControlOption<PricingVisibilityMode>
+> = [
+  { value: "pricing", label: "Pricing", ariaLabel: "Pricing mode" },
+  { value: "planning", label: "Planning", ariaLabel: "Planning mode" },
+];
 
 const VIEW_OPTIONS: ReadonlyArray<SegmentedControlOption<ViewMode>> = [
   { value: "internal", label: "Internal" },
@@ -28,8 +36,9 @@ export interface TopbarProps {
   planningMode: boolean;
   view: ViewMode;
   onProjectNameChange: (projectName: string) => void;
-  onTogglePlanningMode: () => void;
+  onPlanningModeChange: (planningMode: boolean) => void;
   onViewChange: (view: ViewMode) => void;
+  onReset: () => void;
   onImport: (file: File) => void | Promise<void>;
   onExport: () => void;
 }
@@ -39,8 +48,9 @@ export function Topbar({
   planningMode,
   view,
   onProjectNameChange,
-  onTogglePlanningMode,
+  onPlanningModeChange,
   onViewChange,
+  onReset,
   onImport,
   onExport,
 }: TopbarProps) {
@@ -50,6 +60,11 @@ export function Topbar({
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (file) void onImport(file);
+  };
+
+  const handlePricingVisibilityChange = (mode: PricingVisibilityMode) => {
+    const nextPlanningMode = mode === "planning";
+    if (nextPlanningMode !== planningMode) onPlanningModeChange(nextPlanningMode);
   };
 
   return (
@@ -63,39 +78,39 @@ export function Topbar({
       </div>
 
       <label className="project-identity">
-        <span className="project-identity-icon">
-          <BriefcaseBusiness size={17} />
-        </span>
-        <span className="project-identity-copy">
-          <small>Current project</small>
-          <TextInput
-            aria-label="Project name"
-            value={projectName}
-            onChange={(event) => onProjectNameChange(event.target.value)}
-          />
-        </span>
+        <TextInput
+          aria-label="Project name"
+          title={projectName}
+          value={projectName}
+          onChange={(event) => onProjectNameChange(event.target.value)}
+        />
       </label>
 
       <div className="topbar-actions">
         <div className="mode-controls">
-          <Switch
-            size="lg"
-            checked={planningMode}
-            onCheckedChange={onTogglePlanningMode}
-            label="Planning mode"
-            ariaLabel={
-              planningMode
-                ? "Turn off planning mode and show pricing"
-                : "Turn on planning mode and hide pricing"
-            }
-            title={planningMode ? "Show pricing" : "Hide pricing"}
-            checkedDescription="Pricing hidden"
-            uncheckedDescription="Pricing visible"
-            checkedIcon={<EyeOff size={15} />}
-            uncheckedIcon={<Eye size={15} />}
-          />
           <SegmentedControl
-            size="lg"
+            size="md"
+            className="topbar-planning-switch"
+            value={planningMode ? "planning" : "pricing"}
+            options={PRICING_VISIBILITY_OPTIONS}
+            onChange={handlePricingVisibilityChange}
+            ariaLabel="Pricing visibility"
+          />
+          <Button
+            size="md"
+            variant="secondary"
+            className="topbar-planning-toggle"
+            aria-label="Planning mode"
+            aria-pressed={planningMode}
+            title={planningMode ? "Show pricing" : "Hide pricing"}
+            leadingIcon={planningMode ? <EyeOff size={16} /> : <Eye size={16} />}
+            onClick={() => onPlanningModeChange(!planningMode)}
+          >
+            {planningMode ? "Planning" : "Pricing"}
+          </Button>
+          <SegmentedControl
+            size="md"
+            className="topbar-view-toggle"
             value={view}
             options={VIEW_OPTIONS}
             onChange={onViewChange}
@@ -107,8 +122,19 @@ export function Topbar({
 
         <div className="file-actions">
           <Button
-            size="lg"
-            variant="secondary"
+            size="md"
+            variant="ghost"
+            className="topbar-reset"
+            aria-label="Reset all data"
+            title="Reset all data"
+            leadingIcon={<RotateCcw size={16} />}
+            onClick={onReset}
+          >
+            Reset
+          </Button>
+          <Button
+            size="md"
+            variant="ghost"
             className="topbar-import"
             aria-label="Import project"
             title="Import project"
@@ -118,8 +144,8 @@ export function Topbar({
             Import
           </Button>
           <Button
-            size="lg"
-            variant="primary"
+            size="md"
+            variant="secondary"
             className="topbar-export"
             aria-label="Export project"
             title="Export project"

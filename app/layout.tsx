@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Voxe Pricing Studio",
-  description: "Private, offline-first project pricing and delivery planning for Voxe Group.",
+  description: "Session-only project pricing and delivery planning for Voxe Group.",
   manifest: "/manifest.webmanifest",
   applicationName: "Voxe Pricing Studio",
   themeColor: "#0a0712",

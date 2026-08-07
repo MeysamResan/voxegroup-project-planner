@@ -7,6 +7,7 @@ import { Toast } from "@/components/ui";
 import { downloadJson } from "@/lib/files/project-export";
 import {
   calculateScenario,
+  initialWorkspace,
   makePerson,
   normalizeWorkspace,
   safeFilename,
@@ -25,10 +26,10 @@ import {
   PersonEditorDialog,
   PhasesStaffing,
   ProjectSettings,
-  RevealPricingDialog,
+  ResetWorkspaceDialog,
   Topbar,
 } from "./components";
-import { useOfflineSupport, usePricingWorkspace, useToast } from "./hooks";
+import { useLegacyBrowserCleanup, usePricingWorkspace, useToast } from "./hooks";
 
 const MAX_IMPORT_BYTES = 5_000_000;
 const PRINT_RESTORE_FALLBACK_MS = 1_000;
@@ -45,12 +46,8 @@ export function PricingStudio() {
     planningMode,
     setPlanningMode,
     workspace,
-  } = usePricingWorkspace({
-    onPersistenceError: () => {
-      showToast("Browser storage is unavailable; changes will last for this session only.");
-    },
-  });
-  useOfflineSupport();
+  } = usePricingWorkspace();
+  useLegacyBrowserCleanup();
 
   const [view, setView] = useState<ViewMode>("internal");
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
@@ -61,7 +58,7 @@ export function PricingStudio() {
   const [maximizedDeliveryPanel, setMaximizedDeliveryPanel] =
     useState<DeliveryPanel | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [revealPricingOpen, setRevealPricingOpen] = useState(false);
+  const [resetWorkspaceOpen, setResetWorkspaceOpen] = useState(false);
   const importRequestRef = useRef(0);
   const planningModeRef = useRef(planningMode);
   const printSessionRef = useRef<PrintSession | null>(null);
@@ -76,24 +73,33 @@ export function PricingStudio() {
     [project, workspace.people],
   );
 
-  const togglePlanningMode = () => {
-    if (planningMode) {
-      setExportOpen(false);
-      setRevealPricingOpen(true);
-      return;
-    }
+  const changePlanningMode = (nextPlanningMode: boolean) => {
+    if (nextPlanningMode === planningMode) return;
 
-    setPlanningMode(true);
+    setPlanningMode(nextPlanningMode);
     setMaximizedProjectPanel(null);
     setExportOpen(false);
-    showToast("Planning mode on — pricing hidden");
+    showToast(
+      nextPlanningMode
+        ? "Planning mode on — pricing hidden"
+        : "Pricing mode on — pricing visible",
+    );
   };
 
-  const revealPricing = () => {
+  const resetWorkspace = () => {
+    importRequestRef.current += 1;
+    printSessionRef.current?.finish(false);
+    dispatch(workspaceActions.replaceWorkspace(initialWorkspace()));
     setPlanningMode(false);
+    setView("internal");
+    setEditingPerson(null);
+    setIsNewPerson(false);
+    setDragOverPhase(null);
     setMaximizedProjectPanel(null);
-    setRevealPricingOpen(false);
-    showToast("Planning mode off — pricing restored");
+    setMaximizedDeliveryPanel(null);
+    setExportOpen(false);
+    setResetWorkspaceOpen(false);
+    showToast("Preset restored — changes remain session-only");
   };
 
   const importProject = async (file: File) => {
@@ -229,8 +235,9 @@ export function PricingStudio() {
         onProjectNameChange={(projectName) =>
           dispatch(workspaceActions.patchProject({ projectName }))
         }
-        onTogglePlanningMode={togglePlanningMode}
+        onPlanningModeChange={changePlanningMode}
         onViewChange={setView}
+        onReset={() => setResetWorkspaceOpen(true)}
         onImport={importProject}
         onExport={() => setExportOpen(true)}
       />
@@ -322,10 +329,10 @@ export function PricingStudio() {
         onDelete={deletePerson}
       />
 
-      <RevealPricingDialog
-        open={revealPricingOpen}
-        onClose={() => setRevealPricingOpen(false)}
-        onReveal={revealPricing}
+      <ResetWorkspaceDialog
+        open={resetWorkspaceOpen}
+        onClose={() => setResetWorkspaceOpen(false)}
+        onReset={resetWorkspace}
       />
 
       {exportOpen && (

@@ -1,6 +1,6 @@
 # Voxe Pricing Studio
 
-Private, offline-first project pricing and delivery planning for Voxe Group.
+Session-only project pricing and delivery planning for Voxe Group.
 
 ## Privacy model
 

@@ -3,7 +3,6 @@
 import {
   useEffect,
   useReducer,
-  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -13,9 +12,6 @@ import {
   PLANNING_MODE_KEY,
   STORAGE_KEY,
   initialWorkspace,
-  normalizeWorkspace,
-  parsePlanningMode,
-  workspaceActions,
   workspaceReducer,
   type Workspace,
   type WorkspaceAction,
@@ -29,65 +25,36 @@ export interface PricingWorkspaceState {
   setPlanningMode: Dispatch<SetStateAction<boolean>>;
 }
 
-export interface UsePricingWorkspaceOptions {
-  onPersistenceError?: () => void;
-}
-
 /**
- * Owns browser hydration and local persistence for the pricing workspace.
- * Privacy is fail-closed: malformed or missing state always starts in Planning mode.
+ * Owns session-only workspace state.
+ * Every page load starts from the built-in preset with pricing visible.
  */
-export function usePricingWorkspace(
-  options: UsePricingWorkspaceOptions = {},
-): PricingWorkspaceState {
+export function usePricingWorkspace(): PricingWorkspaceState {
   const [workspace, dispatch] = useReducer(workspaceReducer, undefined, initialWorkspace);
   const [hydrated, setHydrated] = useState(false);
-  const [planningMode, setPlanningMode] = useState(true);
-  const errorHandlerRef = useRef(options.onPersistenceError);
-
-  useEffect(() => {
-    errorHandlerRef.current = options.onPersistenceError;
-  }, [options.onPersistenceError]);
+  const [planningMode, setPlanningMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
+
+      // Remove data written by older releases without touching unrelated
+      // storage owned by the same origin. This app never reads or persists
+      // workspace state there.
       try {
-        setPlanningMode(parsePlanningMode(localStorage.getItem(PLANNING_MODE_KEY)));
-        const savedWorkspace = localStorage.getItem(STORAGE_KEY);
-        if (savedWorkspace) {
-          const normalized = normalizeWorkspace(JSON.parse(savedWorkspace) as unknown);
-          if (normalized) dispatch(workspaceActions.replaceWorkspace(normalized));
-        }
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(PLANNING_MODE_KEY);
       } catch {
-        errorHandlerRef.current?.();
-      } finally {
-        setHydrated(true);
+        // Storage access can be blocked; state is session-only regardless.
       }
+
+      setHydrated(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
-    } catch {
-      errorHandlerRef.current?.();
-    }
-  }, [hydrated, workspace]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(PLANNING_MODE_KEY, String(planningMode));
-    } catch {
-      errorHandlerRef.current?.();
-    }
-  }, [hydrated, planningMode]);
 
   return {
     workspace,
@@ -98,17 +65,50 @@ export function usePricingWorkspace(
   };
 }
 
-/** Registers the optional offline shell only in browser contexts that permit it. */
-export function useOfflineSupport(): void {
-  useEffect(() => {
-    const trustedLocal =
-      window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1";
-    if (
-      "serviceWorker" in navigator &&
-      (window.location.protocol === "https:" || trustedLocal)
-    ) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+const LEGACY_CACHE_PREFIX = "voxe-pricing-studio-v";
+const LEGACY_SERVICE_WORKER_PATH = "/sw.js";
+
+const isLegacyServiceWorker = (registration: ServiceWorkerRegistration): boolean =>
+  [registration.installing, registration.waiting, registration.active].some((worker) => {
+    if (!worker) return false;
+    try {
+      return new URL(worker.scriptURL).pathname === LEGACY_SERVICE_WORKER_PATH;
+    } catch {
+      return false;
     }
+  });
+
+/** Removes the retired offline shell so refreshes always load the current application. */
+export function useLegacyBrowserCleanup(): void {
+  useEffect(() => {
+    const clearLegacyBrowserState = async () => {
+      if ("serviceWorker" in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(
+            registrations
+              .filter(isLegacyServiceWorker)
+              .map((registration) => registration.unregister().catch(() => false)),
+          );
+        } catch {
+          // A restricted browser context may not expose registrations.
+        }
+      }
+
+      if ("caches" in window) {
+        try {
+          const cacheNames = await window.caches.keys();
+          await Promise.all(
+            cacheNames
+              .filter((cacheName) => cacheName.startsWith(LEGACY_CACHE_PREFIX))
+              .map((cacheName) => window.caches.delete(cacheName)),
+          );
+        } catch {
+          // Cache Storage can be unavailable in private or restricted contexts.
+        }
+      }
+    };
+
+    void clearLegacyBrowserState();
   }, []);
 }

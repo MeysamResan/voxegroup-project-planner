@@ -199,12 +199,14 @@ export function CommercialSettings({
 
 export interface ScheduleTimeSettingsProps extends SettingsPanelControlProps {
   project: ProjectPlan;
+  calculation: ScenarioCalculation;
   holidayDraft: string;
   onHolidayDraftChange: (value: string) => void;
   onProjectChange: ProjectPatchHandler;
 }
 
 export function ScheduleTimeSettings({
+  calculation,
   holidayDraft,
   maximized,
   onHolidayDraftChange,
@@ -215,6 +217,9 @@ export function ScheduleTimeSettings({
   const idPrefix = useId().replace(/:/g, "");
   const workingDaysLabelId = `${idPrefix}-working-weekdays-label`;
   const holidayAlreadyExcluded = project.holidays.includes(holidayDraft);
+  const hasCalculatedSchedule = project.workingDays.length > 0
+    && Boolean(calculation.projectStart)
+    && Boolean(calculation.projectEnd);
 
   const toggleWorkingDay = (day: number) => {
     const workingDays = project.workingDays.includes(day)
@@ -319,6 +324,31 @@ export function ScheduleTimeSettings({
             ))}
             {!project.holidays.length && <small>No excluded dates</small>}
           </div>
+        </div>
+      </div>
+
+      <div
+        className={`schedule-summary${hasCalculatedSchedule ? "" : " is-unavailable"}`}
+        aria-label="Calculated schedule"
+        aria-live="polite"
+      >
+        <div className="schedule-summary-copy">
+          <span>{hasCalculatedSchedule ? "Calculated timeline" : "Schedule unavailable"}</span>
+          {hasCalculatedSchedule ? (
+            <strong>
+              {friendlyDate(calculation.projectStart)} to {friendlyDate(calculation.projectEnd)}
+            </strong>
+          ) : (
+            <strong>Choose at least one working weekday to calculate project dates.</strong>
+          )}
+        </div>
+        <div className="schedule-summary-stat">
+          <span>Calendar span</span>
+          <strong>{hasCalculatedSchedule ? `${calculation.calendarDays} days` : "Unavailable"}</strong>
+        </div>
+        <div className="schedule-summary-stat">
+          <span>Planned effort</span>
+          <strong>{calculation.totalWorkingDays} workdays</strong>
         </div>
       </div>
     </section>
@@ -672,6 +702,7 @@ export function ProjectSettings({
           {showSchedule && (
             <ScheduleTimeSettings
               project={project}
+              calculation={calculation}
               maximized={effectiveMaximizedPanel === "schedule"}
               onToggleMaximize={() => togglePanel("schedule")}
               holidayDraft={holidayDraft}

@@ -257,10 +257,3 @@ export const normalizeWorkspace = (value: unknown): Workspace | null => {
     project,
   };
 };
-
-/**
- * Stored privacy state is fail-closed: only the exact string `"false"`
- * intentionally reveals prices. Missing, malformed or differently-cased values
- * keep Planning mode enabled.
- */
-export const parsePlanningMode = (storedValue: unknown): boolean => storedValue !== "false";
