@@ -174,23 +174,23 @@ test("fresh SSR defaults to pricing and exposes the complete preset", async () =
 });
 
 test("workspace and app-shell state stay session-only and reset restores the preset", async () => {
-  const [route, studio, workspaceHook, resetDialog, retirementWorker, serverWorker] =
+  const [route, planner, workspaceHook, resetDialog, retirementWorker, serverWorker] =
     await Promise.all([
       readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-      readFile(new URL("../features/pricing/PricingStudio.tsx", import.meta.url), "utf8"),
-      readFile(new URL("../features/pricing/hooks/usePricingWorkspace.ts", import.meta.url), "utf8"),
-      readFile(new URL("../features/pricing/components/ResetWorkspaceDialog.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../features/project-planner/ProjectPlanner.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../features/project-planner/hooks/useProjectWorkspace.ts", import.meta.url), "utf8"),
+      readFile(new URL("../features/project-planner/components/ResetWorkspaceDialog.tsx", import.meta.url), "utf8"),
       readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
       readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     ]);
 
   assert.match(
     route,
-    /import\s*{\s*PricingStudio\s*}\s*from\s*["']@\/features\/pricing\/PricingStudio["']/,
+    /import\s*{\s*ProjectPlanner\s*}\s*from\s*["']@\/features\/project-planner\/ProjectPlanner["']/,
   );
-  assert.match(route, /return\s*<PricingStudio\s*\/>/);
-  assert.match(studio, /export\s+function\s+PricingStudio\s*\(/);
-  assert.match(studio, /usePricingWorkspace\s*\(\s*\)/);
+  assert.match(route, /return\s*<ProjectPlanner\s*\/>/);
+  assert.match(planner, /export\s+function\s+ProjectPlanner\s*\(/);
+  assert.match(planner, /useProjectWorkspace\s*\(\s*\)/);
 
   assert.match(workspaceHook, /useReducer\(workspaceReducer, undefined, initialWorkspace\)/);
   assert.match(
@@ -198,29 +198,29 @@ test("workspace and app-shell state stay session-only and reset restores the pre
     /const \[planningMode, setPlanningMode\] = useState\(false\)/,
   );
   assert.doesNotMatch(workspaceHook, /localStorage\.(?:getItem|setItem)\s*\(/);
-  assert.match(workspaceHook, /localStorage\.removeItem\(STORAGE_KEY\)/);
-  assert.match(workspaceHook, /localStorage\.removeItem\(PLANNING_MODE_KEY\)/);
+  assert.match(workspaceHook, /\.\.\.LEGACY_STORAGE_KEYS/);
+  assert.match(workspaceHook, /localStorage\.removeItem\(storageKey\)/);
   assert.doesNotMatch(workspaceHook, /JSON\.(?:parse|stringify)/);
   assert.doesNotMatch(workspaceHook, /navigator\.serviceWorker\.register\s*\(/);
   assert.match(workspaceHook, /navigator\.serviceWorker\.getRegistrations\(\)/);
   assert.match(workspaceHook, /registration\.unregister\(\)/);
   assert.match(workspaceHook, /window\.caches\.keys\(\)/);
-  assert.match(workspaceHook, /cacheName\.startsWith\(LEGACY_CACHE_PREFIX\)/);
+  assert.match(workspaceHook, /RETIRED_CACHE_PREFIXES\.some/);
 
   assert.match(
-    studio,
+    planner,
     /dispatch\(workspaceActions\.replaceWorkspace\(initialWorkspace\(\)\)\)/,
   );
-  assert.match(studio, /useLegacyBrowserCleanup\(\)/);
-  assert.match(studio, /setPlanningMode\(false\)/);
-  assert.match(studio, /setView\("internal"\)/);
-  assert.match(studio, /importRequestRef\.current \+= 1/);
+  assert.match(planner, /useLegacyBrowserCleanup\(\)/);
+  assert.match(planner, /setPlanningMode\(false\)/);
+  assert.match(planner, /setView\("internal"\)/);
+  assert.match(planner, /importRequestRef\.current \+= 1/);
   assert.match(resetDialog, /title="Restore the preset\?"/);
   assert.match(resetDialog, /All current edits and imported data will be discarded\./);
   assert.match(resetDialog, /variant="danger"/);
 
   assert.match(retirementWorker, /self\.skipWaiting\(\)/);
-  assert.match(retirementWorker, /cacheName\.startsWith\(CACHE_PREFIX\)/);
+  assert.match(retirementWorker, /RETIRED_CACHE_PREFIXES\.some/);
   assert.match(retirementWorker, /self\.clients\.claim\(\)/);
   assert.match(retirementWorker, /self\.registration\.unregister\(\)/);
   assert.match(retirementWorker, /client\.navigate\(client\.url\)/);
@@ -281,7 +281,7 @@ test("Planning/Pricing and Internal/Client use restrained animated segmented con
 test("project settings controls use one standard shared size", async () => {
   const [response, settingsSource, noteSource, fieldSource, primitiveStyles] = await Promise.all([
     renderPage(),
-    readFile(new URL("../features/pricing/components/ProjectSettings.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/project-planner/components/ProjectSettings.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/ai-note.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/field.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
@@ -487,7 +487,7 @@ test("the live backdrop keeps its effects inside a bounded GPU budget", async ()
 
 test("the topbar stays compact and single-row until the narrow mobile breakpoint", async () => {
   const [topbarSource, globalStyles] = await Promise.all([
-    readFile(new URL("../features/pricing/components/Topbar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/project-planner/components/Topbar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -609,28 +609,28 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
 
 test("core pricing features compose the shared UI primitives", async () => {
   const contracts = [
-    ["../features/pricing/PricingStudio.tsx", ["Toast"]],
-    ["../features/pricing/components/Topbar.tsx", ["Button", "SegmentedControl", "TextInput"]],
+    ["../features/project-planner/ProjectPlanner.tsx", ["Toast"]],
+    ["../features/project-planner/components/Topbar.tsx", ["Button", "SegmentedControl", "TextInput"]],
     [
-      "../features/pricing/components/ResetWorkspaceDialog.tsx",
+      "../features/project-planner/components/ResetWorkspaceDialog.tsx",
       ["Button", "DialogActions", "Modal"],
     ],
-    ["../features/pricing/components/OverviewMetrics.tsx", ["SummaryCard"]],
+    ["../features/project-planner/components/OverviewMetrics.tsx", ["SummaryCard"]],
     [
-      "../features/pricing/components/ProjectSettings.tsx",
+      "../features/project-planner/components/ProjectSettings.tsx",
       ["MoneyInput", "NumberStepper", "SectionCard"],
     ],
     [
-      "../features/pricing/components/PhasesStaffing.tsx",
+      "../features/project-planner/components/PhasesStaffing.tsx",
       ["NumberStepper", "SectionCard"],
     ],
     [
-      "../features/pricing/components/DecisionAnalytics.tsx",
+      "../features/project-planner/components/DecisionAnalytics.tsx",
       ["SectionCard", "SummaryCard"],
     ],
-    ["../features/pricing/components/ExportDialog.tsx", ["ActionCard", "Modal"]],
+    ["../features/project-planner/components/ExportDialog.tsx", ["ActionCard", "Modal"]],
     [
-      "../features/pricing/components/PersonEditorDialog.tsx",
+      "../features/project-planner/components/PersonEditorDialog.tsx",
       ["ColorPicker", "Field", "Modal", "MoneyInput"],
     ],
   ];

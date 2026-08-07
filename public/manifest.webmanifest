@@ -1,7 +1,7 @@
 {
-  "name": "Voxe Pricing Studio",
-  "short_name": "Voxe Pricing",
-  "description": "Session-only project pricing and delivery planning.",
+  "name": "Project Planner",
+  "short_name": "Project Planner",
+  "description": "Session-only project planning, pricing, and delivery analytics.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0712",

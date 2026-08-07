@@ -7,10 +7,15 @@ import type {
   PersonType,
 } from "./types.ts";
 
-export const APP_ID = "voxe-pricing-studio" as const;
+export const APP_ID = "voxegroup-project-planner" as const;
+export const LEGACY_APP_IDS = ["voxe-pricing-studio"] as const;
 export const SCHEMA_VERSION = 7 as const;
-export const STORAGE_KEY = "voxe-pricing-studio-v1";
-export const PLANNING_MODE_KEY = "voxe-pricing-planning-mode-v1";
+export const STORAGE_KEY = "voxegroup-project-planner-v1";
+export const PLANNING_MODE_KEY = "voxegroup-project-planner-planning-mode-v1";
+export const LEGACY_STORAGE_KEYS = [
+  "voxe-pricing-studio-v1",
+  "voxe-pricing-planning-mode-v1",
+] as const;
 
 export const CURRENCIES: readonly Currency[] = ["USD", "IQD", "EUR", "RUB"];
 export const PERSON_TYPES: readonly PersonType[] = [

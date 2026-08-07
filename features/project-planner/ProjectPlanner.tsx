@@ -29,7 +29,7 @@ import {
   ResetWorkspaceDialog,
   Topbar,
 } from "./components";
-import { useLegacyBrowserCleanup, usePricingWorkspace, useToast } from "./hooks";
+import { useLegacyBrowserCleanup, useProjectWorkspace, useToast } from "./hooks";
 
 const MAX_IMPORT_BYTES = 5_000_000;
 const PRINT_RESTORE_FALLBACK_MS = 1_000;
@@ -38,7 +38,7 @@ type PrintSession = {
   finish: (restoreView?: boolean) => void;
 };
 
-export function PricingStudio() {
+export function ProjectPlanner() {
   const { message: toast, showToast } = useToast();
   const {
     dispatch,
@@ -46,7 +46,7 @@ export function PricingStudio() {
     planningMode,
     setPlanningMode,
     workspace,
-  } = usePricingWorkspace();
+  } = useProjectWorkspace();
   useLegacyBrowserCleanup();
 
   const [view, setView] = useState<ViewMode>("internal");
@@ -125,7 +125,7 @@ export function PricingStudio() {
       );
     } catch {
       if (requestId !== importRequestRef.current) return;
-      showToast("That file is not a valid Voxe workspace");
+      showToast("That file is not a valid Project Planner workspace");
     }
   };
 
@@ -135,7 +135,7 @@ export function PricingStudio() {
       return;
     }
     try {
-      downloadJson(workspace, `${safeFilename(project.projectName)}.voxe.json`);
+      downloadJson(workspace, `${safeFilename(project.projectName)}.project-planner.json`);
       setExportOpen(false);
       showToast("Project file downloaded");
     } catch {

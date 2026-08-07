@@ -209,6 +209,7 @@ test("legacy clientRate and scenario workspaces migrate to the current project m
   const normalized = normalizeWorkspace(legacy);
 
   assert.ok(normalized);
+  assert.equal(normalized.app, "voxegroup-project-planner");
   assert.equal(normalized.project.baseHourlyPrice, 77);
   assert.equal("clientRate" in normalized.project, false);
   assert.equal(normalized.schemaVersion, 7);

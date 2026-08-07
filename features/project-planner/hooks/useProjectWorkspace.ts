@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  LEGACY_STORAGE_KEYS,
   PLANNING_MODE_KEY,
   STORAGE_KEY,
   initialWorkspace,
@@ -17,7 +18,7 @@ import {
   type WorkspaceAction,
 } from "@/lib/pricing";
 
-export interface PricingWorkspaceState {
+export interface ProjectWorkspaceState {
   workspace: Workspace;
   dispatch: Dispatch<WorkspaceAction>;
   hydrated: boolean;
@@ -29,7 +30,7 @@ export interface PricingWorkspaceState {
  * Owns session-only workspace state.
  * Every page load starts from the built-in preset with pricing visible.
  */
-export function usePricingWorkspace(): PricingWorkspaceState {
+export function useProjectWorkspace(): ProjectWorkspaceState {
   const [workspace, dispatch] = useReducer(workspaceReducer, undefined, initialWorkspace);
   const [hydrated, setHydrated] = useState(false);
   const [planningMode, setPlanningMode] = useState(false);
@@ -43,8 +44,13 @@ export function usePricingWorkspace(): PricingWorkspaceState {
       // storage owned by the same origin. This app never reads or persists
       // workspace state there.
       try {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(PLANNING_MODE_KEY);
+        for (const storageKey of [
+          STORAGE_KEY,
+          PLANNING_MODE_KEY,
+          ...LEGACY_STORAGE_KEYS,
+        ]) {
+          localStorage.removeItem(storageKey);
+        }
       } catch {
         // Storage access can be blocked; state is session-only regardless.
       }
@@ -65,7 +71,10 @@ export function usePricingWorkspace(): PricingWorkspaceState {
   };
 }
 
-const LEGACY_CACHE_PREFIX = "voxe-pricing-studio-v";
+const RETIRED_CACHE_PREFIXES = [
+  "voxe-pricing-studio-v",
+  "voxegroup-project-planner-v",
+] as const;
 const LEGACY_SERVICE_WORKER_PATH = "/sw.js";
 
 const isLegacyServiceWorker = (registration: ServiceWorkerRegistration): boolean =>
@@ -100,7 +109,9 @@ export function useLegacyBrowserCleanup(): void {
           const cacheNames = await window.caches.keys();
           await Promise.all(
             cacheNames
-              .filter((cacheName) => cacheName.startsWith(LEGACY_CACHE_PREFIX))
+              .filter((cacheName) =>
+                RETIRED_CACHE_PREFIXES.some((prefix) => cacheName.startsWith(prefix)),
+              )
               .map((cacheName) => window.caches.delete(cacheName)),
           );
         } catch {

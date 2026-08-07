@@ -1,5 +1,5 @@
-import { PricingStudio } from "@/features/pricing/PricingStudio";
+import { ProjectPlanner } from "@/features/project-planner/ProjectPlanner";
 
 export default function Home() {
-  return <PricingStudio />;
+  return <ProjectPlanner />;
 }

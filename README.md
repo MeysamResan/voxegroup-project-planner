@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="./public/favicon.svg" width="76" height="76" alt="Voxe Pricing Studio logo">
+  <img src="./public/favicon.svg" width="76" height="76" alt="Project Planner logo">
 
-  <h1>Voxe Pricing Studio</h1>
+  <h1>Project Planner</h1>
 
   <p><strong>Plan the delivery. Model the economics. Present a confident quote.</strong></p>
   <p>
@@ -16,13 +16,14 @@
     <code>Vite 8</code>
     <code>Cloudflare Workers</code>
   </p>
+  <p><code>voxegroup-project-planner</code></p>
 </div>
 
 ---
 
 ## Overview
 
-Voxe Pricing Studio brings delivery planning and commercial modeling into one focused workspace. It connects project phases, team assignments, working calendars, expenses, pricing modifiers, and margin analytics so a quote remains traceable from the plan behind it.
+Project Planner brings delivery planning and commercial modeling into one focused workspace. It connects project phases, team assignments, working calendars, expenses, pricing modifiers, and margin analytics so a quote remains traceable from the plan behind it.
 
 The app opens with a realistic built-in preset and **Pricing** selected by default. It is intentionally session-only: edits remain in memory for the current page session and a refresh restores the original preset.
 
@@ -113,7 +114,7 @@ components/
   app/                       Shared application-level visuals
   ui/                        Reusable controls and design-system primitives
 features/
-  pricing/                   Pricing workspace, hooks, and feature panels
+  project-planner/           Project workspace, hooks, and feature panels
 lib/
   files/                     JSON export helpers
   pricing/                   Domain model, calculations, calendar, and actions

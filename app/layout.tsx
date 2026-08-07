@@ -14,14 +14,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Voxe Pricing Studio",
-  description: "Session-only project pricing and delivery planning for Voxe Group.",
+  title: "Project Planner",
+  description: "Session-only project planning, pricing, and delivery analytics for Voxe Group.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Voxe Pricing Studio",
+  applicationName: "Project Planner",
   themeColor: "#0a0712",
   appleWebApp: {
     capable: true,
-    title: "Voxe Pricing",
+    title: "Project Planner",
     statusBarStyle: "black-translucent",
   },
   other: {

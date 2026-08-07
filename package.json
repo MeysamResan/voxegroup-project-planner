@@ -1,5 +1,5 @@
 {
-  "name": "voxe-pricing-studio",
+  "name": "voxegroup-project-planner",
   "version": "0.1.0",
   "private": true,
   "license": "UNLICENSED",
@@ -43,5 +43,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "Voxe Pricing Studio"
+  "displayName": "Project Planner"
 }

@@ -6,6 +6,7 @@ import {
   DEFAULT_START_DATE,
   EXPENSE_BILLINGS,
   EXPENSE_UNITS,
+  LEGACY_APP_IDS,
   MODIFIER_KINDS,
   MODIFIER_TARGETS,
   PERSON_TYPES,
@@ -230,9 +231,16 @@ const isFutureSchema = (value: unknown): boolean => {
   return false;
 };
 
+const isSupportedAppId = (value: unknown): boolean =>
+  value === APP_ID || LEGACY_APP_IDS.some((legacyId) => value === legacyId);
+
 export const normalizeWorkspace = (value: unknown): Workspace | null => {
   if (!isRecord(value)) return null;
-  if (value.app !== APP_ID || !Array.isArray(value.people) || isFutureSchema(value.schemaVersion)) {
+  if (
+    !isSupportedAppId(value.app) ||
+    !Array.isArray(value.people) ||
+    isFutureSchema(value.schemaVersion)
+  ) {
     return null;
   }
 

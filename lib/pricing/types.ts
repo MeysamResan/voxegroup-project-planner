@@ -85,7 +85,7 @@ export type ProjectPlan = {
 };
 
 export type Workspace = {
-  app: "voxe-pricing-studio";
+  app: "voxegroup-project-planner";
   schemaVersion: 7;
   people: Person[];
   project: ProjectPlan;

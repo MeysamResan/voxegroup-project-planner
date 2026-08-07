@@ -1,4 +1,7 @@
-const CACHE_PREFIX = "voxe-pricing-studio-v";
+const RETIRED_CACHE_PREFIXES = [
+  "voxe-pricing-studio-v",
+  "voxegroup-project-planner-v",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -10,7 +13,9 @@ self.addEventListener("activate", (event) => {
       const cacheNames = await caches.keys();
       await Promise.all(
         cacheNames
-          .filter((cacheName) => cacheName.startsWith(CACHE_PREFIX))
+          .filter((cacheName) =>
+            RETIRED_CACHE_PREFIXES.some((prefix) => cacheName.startsWith(prefix)),
+          )
           .map((cacheName) => caches.delete(cacheName)),
       );
 
