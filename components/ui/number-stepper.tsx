@@ -57,7 +57,7 @@ export function NumberStepper({
   const commit = (nextValue: number) => {
     const normalized = normalizeValue(nextValue, min, max);
     setDraft(String(normalized));
-    onChange(normalized);
+    if (!Object.is(normalized, value)) onChange(normalized);
   };
 
   const stepBy = (direction: -1 | 1) => {
@@ -103,7 +103,10 @@ export function NumberStepper({
           const nextDraft = event.target.value;
           setDraft(nextDraft);
           const parsed = Number(nextDraft);
-          if (nextDraft !== "" && nextDraft !== "-" && Number.isFinite(parsed)) onChange(parsed);
+          if (nextDraft !== "" && nextDraft !== "-" && Number.isFinite(parsed)) {
+            const normalized = normalizeValue(parsed, min, max);
+            if (!Object.is(normalized, value)) onChange(normalized);
+          }
         }}
         onBlur={(event) => {
           const parsed = Number(draft);

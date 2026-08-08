@@ -97,8 +97,13 @@ const copyWithout = <T extends object>(
   return copy;
 };
 
+const patchChangesValue = <T extends object>(value: T, patch: Partial<T>): boolean =>
+  (Object.keys(patch) as (keyof T)[]).some(
+    (key) => !Object.is(value[key], patch[key]),
+  );
+
 const updateEntity = <T extends { id: string }>(
-  entities: readonly T[],
+  entities: T[],
   entityId: string,
   patch: Partial<Omit<T, "id">>,
   additionalBlockedKeys: readonly (keyof T)[] = [],
@@ -110,6 +115,7 @@ const updateEntity = <T extends { id: string }>(
     patch as Partial<T>,
     ["id", ...additionalBlockedKeys] as (keyof T)[],
   );
+  if (!patchChangesValue(entities[index], safePatch)) return entities;
   const updated = [...entities];
   updated[index] = { ...entities[index], ...safePatch };
   return updated;
@@ -132,6 +138,7 @@ export const workspaceReducer = (
         action.patch as Partial<ProjectPlan>,
         ["phases", "expenses", "modifiers"],
       );
+      if (!patchChangesValue(workspace.project, patch)) return workspace;
       return {
         ...workspace,
         project: { ...workspace.project, ...patch },
@@ -163,7 +170,7 @@ export const workspaceReducer = (
         action.patch,
         ["assignments"],
       );
-      if (!phases) return workspace;
+      if (!phases || phases === workspace.project.phases) return workspace;
       return { ...workspace, project: { ...workspace.project, phases } };
     }
 
@@ -229,7 +236,7 @@ export const workspaceReducer = (
         action.expenseId,
         action.patch,
       );
-      if (!expenses) return workspace;
+      if (!expenses || expenses === workspace.project.expenses) return workspace;
       return { ...workspace, project: { ...workspace.project, expenses } };
     }
 
@@ -262,7 +269,7 @@ export const workspaceReducer = (
         action.modifierId,
         action.patch,
       );
-      if (!modifiers) return workspace;
+      if (!modifiers || modifiers === workspace.project.modifiers) return workspace;
       return { ...workspace, project: { ...workspace.project, modifiers } };
     }
 
@@ -283,6 +290,12 @@ export const workspaceReducer = (
       if (!validId(action.person.id)) return workspace;
       const person = { ...action.person };
       const existingIndex = workspace.people.findIndex((item) => item.id === person.id);
+      if (
+        existingIndex >= 0 &&
+        !patchChangesValue(workspace.people[existingIndex], person)
+      ) {
+        return workspace;
+      }
       const people = [...workspace.people];
       if (existingIndex < 0) people.push(person);
       else people[existingIndex] = person;

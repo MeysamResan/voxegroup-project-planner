@@ -41,6 +41,7 @@ import {
   EXPENSE_UNITS,
   UNIT_LABELS,
 } from "@/lib/pricing/constants.ts";
+import { toggleWorkingDaySelection } from "@/lib/pricing/calendar.ts";
 import { currencyFormat, friendlyDate } from "@/lib/pricing/formatters.ts";
 import { selectVisibleModifiers } from "@/lib/pricing/selectors.ts";
 import type {
@@ -216,15 +217,14 @@ export function ScheduleTimeSettings({
 }: ScheduleTimeSettingsProps) {
   const idPrefix = useId().replace(/:/g, "");
   const workingDaysLabelId = `${idPrefix}-working-weekdays-label`;
+  const workingDaysHintId = `${idPrefix}-working-weekdays-hint`;
   const holidayAlreadyExcluded = project.holidays.includes(holidayDraft);
   const hasCalculatedSchedule = project.workingDays.length > 0
     && Boolean(calculation.projectStart)
     && Boolean(calculation.projectEnd);
 
   const toggleWorkingDay = (day: number) => {
-    const workingDays = project.workingDays.includes(day)
-      ? project.workingDays.filter((item) => item !== day)
-      : [...project.workingDays, day].sort((left, right) => left - right);
+    const workingDays = toggleWorkingDaySelection(project.workingDays, day);
     onProjectChange({ workingDays });
   };
 
@@ -272,16 +272,29 @@ export function ScheduleTimeSettings({
 
       <div className="schedule-row">
         <div>
-          <span className="mini-label" id={workingDaysLabelId}>Working weekdays</span>
-          <div className="day-selector" role="group" aria-labelledby={workingDaysLabelId}>
+          <div className="working-days-heading">
+            <span className="mini-label" id={workingDaysLabelId}>Working weekdays</span>
+            <span className="working-days-count" aria-live="polite">
+              {project.workingDays.length} selected
+            </span>
+          </div>
+          <div
+            className="day-selector"
+            role="group"
+            aria-labelledby={workingDaysLabelId}
+            aria-describedby={workingDaysHintId}
+          >
             {DAY_LABELS.map((label, day) => {
               const selected = project.workingDays.includes(day);
+              const isOnlySelectedDay = selected && project.workingDays.length === 1;
               return (
                 <button
                   type="button"
                   key={label}
                   className={selected ? "active" : ""}
                   aria-pressed={selected}
+                  disabled={isOnlySelectedDay}
+                  title={isOnlySelectedDay ? "Keep at least one working weekday selected" : undefined}
                   onClick={() => toggleWorkingDay(day)}
                 >
                   {label}
@@ -289,6 +302,10 @@ export function ScheduleTimeSettings({
               );
             })}
           </div>
+          <p className="working-days-hint" id={workingDaysHintId}>
+            Weekdays move calendar dates and calendar-based expenses; phase effort stays in workdays.
+            Keep at least one selected.
+          </p>
         </div>
 
         <div className="holiday-box">
@@ -347,7 +364,7 @@ export function ScheduleTimeSettings({
           <strong>{hasCalculatedSchedule ? `${calculation.calendarDays} days` : "Unavailable"}</strong>
         </div>
         <div className="schedule-summary-stat">
-          <span>Planned effort</span>
+          <span>Phase effort</span>
           <strong>{calculation.totalWorkingDays} workdays</strong>
         </div>
       </div>
@@ -677,7 +694,7 @@ export function ProjectSettings({
   const togglePanel = (panel: ProjectSettingsPanel) => {
     runPanelViewTransition(() => {
       onMaximizedPanelChange(effectiveMaximizedPanel === panel ? null : panel);
-    });
+    }, ".settings-card");
   };
 
   return (

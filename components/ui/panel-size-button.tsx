@@ -12,7 +12,10 @@ export interface PanelSizeButtonProps {
   className?: string;
 }
 
-export function runPanelViewTransition(update: () => void): void {
+export function runPanelViewTransition(
+  update: () => void,
+  targetSelector: string,
+): void {
   if (
     typeof document === "undefined" ||
     typeof window === "undefined" ||
@@ -30,11 +33,32 @@ export function runPanelViewTransition(update: () => void): void {
     return;
   }
 
-  try {
-    const transition = transitionDocument.startViewTransition(() => flushSync(update));
-    void transition.finished.catch(() => undefined);
-  } catch {
+  const target = document.querySelector<HTMLElement>(targetSelector);
+  if (!target) {
     update();
+    return;
+  }
+
+  const previousName = target.style.getPropertyValue("view-transition-name");
+  const restoreName = () => {
+    if (target.style.getPropertyValue("view-transition-name") !== "active-panel") return;
+    if (previousName) target.style.setProperty("view-transition-name", previousName);
+    else target.style.removeProperty("view-transition-name");
+  };
+  target.style.setProperty("view-transition-name", "active-panel");
+  let updateApplied = false;
+  const applyUpdate = () => {
+    if (updateApplied) return;
+    updateApplied = true;
+    flushSync(update);
+  };
+
+  try {
+    const transition = transitionDocument.startViewTransition(applyUpdate);
+    void transition.finished.then(restoreName, restoreName);
+  } catch {
+    restoreName();
+    if (!updateApplied) update();
   }
 }
 

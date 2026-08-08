@@ -10,6 +10,7 @@ import {
   selectAssignedPeopleCount,
   selectDecisionAnalytics,
   selectQuoteBreakdown,
+  toggleWorkingDaySelection,
 } from "../lib/pricing/index.ts";
 
 const closeTo = (actual, expected, epsilon = 1e-9) => {
@@ -89,6 +90,14 @@ test("working weekdays and holidays update the calculated delivery calendar", ()
   assert.ok(fourDayWeek.quote > baseline.quote);
   assert.ok(withAdditionalHoliday.expenseCost > baseline.expenseCost);
   assert.ok(withAdditionalHoliday.quote > baseline.quote);
+});
+
+test("working weekday toggles stay ordered and always retain a usable calendar", () => {
+  assert.deepEqual(toggleWorkingDaySelection([0, 1, 2, 3, 4], 2), [0, 1, 3, 4]);
+  assert.deepEqual(toggleWorkingDaySelection([0, 1, 3, 4], 6), [0, 1, 3, 4, 6]);
+  assert.deepEqual(toggleWorkingDaySelection([3], 3), [3]);
+  assert.deepEqual(toggleWorkingDaySelection([], 5), [5]);
+  assert.deepEqual(toggleWorkingDaySelection([4, 4, 9, -1, 2], 8), [2, 4]);
 });
 
 test("calendar-based billable expenses follow the calculated schedule span", () => {

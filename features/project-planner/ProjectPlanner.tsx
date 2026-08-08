@@ -1,19 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppBackdrop } from "@/components/app/AppBackdrop";
 import { Toast } from "@/components/ui";
 import { downloadJson } from "@/lib/files/project-export";
 import {
   calculateScenario,
+  calculationInputKey,
   initialWorkspace,
   makePerson,
   normalizeWorkspace,
   safeFilename,
   workspaceActions,
   type DeliveryPanel,
+  type ExpensePatch,
+  type ModifierPatch,
   type Person,
+  type PhasePatch,
+  type ProjectPlan,
+  type ProjectPatch,
   type ProjectSettingsPanel,
   type ViewMode,
 } from "@/lib/pricing";
@@ -29,17 +35,50 @@ import {
   ResetWorkspaceDialog,
   Topbar,
 } from "./components";
-import { useLegacyBrowserCleanup, useProjectWorkspace, useToast } from "./hooks";
+import {
+  useColorTheme,
+  useLegacyBrowserCleanup,
+  useProjectWorkspace,
+  useToast,
+} from "./hooks";
 
 const MAX_IMPORT_BYTES = 5_000_000;
 const PRINT_RESTORE_FALLBACK_MS = 1_000;
+
+const StableAppBackdrop = memo(AppBackdrop);
+const StableClientEstimate = memo(ClientEstimate);
+const StableDecisionAnalytics = memo(DecisionAnalytics);
+const StableOverviewMetrics = memo(OverviewMetrics);
+const StablePhasesStaffing = memo(PhasesStaffing);
+const StableProjectSettings = memo(ProjectSettings);
+const StableTopbar = memo(Topbar);
 
 type PrintSession = {
   finish: (restoreView?: boolean) => void;
 };
 
+function useScenarioCalculation(project: ProjectPlan, people: Person[]) {
+  const inputKey = useMemo(
+    () => calculationInputKey(project, people),
+    [people, project],
+  );
+  // Every calculation-relevant value is encoded in inputKey. Display-only
+  // object changes intentionally keep the previous deterministic result.
+  return useMemo(
+    () => calculateScenario(project, people),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [inputKey],
+  );
+}
+
 export function ProjectPlanner() {
   const { message: toast, showToast } = useToast();
+  const {
+    resetTheme,
+    theme,
+    toggleTheme,
+    usingSystemTheme,
+  } = useColorTheme();
   const {
     dispatch,
     hydrated,
@@ -68,12 +107,9 @@ export function ProjectPlanner() {
   }, [planningMode]);
 
   const project = workspace.project;
-  const calculation = useMemo(
-    () => calculateScenario(project, workspace.people),
-    [project, workspace.people],
-  );
+  const calculation = useScenarioCalculation(project, workspace.people);
 
-  const changePlanningMode = (nextPlanningMode: boolean) => {
+  const changePlanningMode = useCallback((nextPlanningMode: boolean) => {
     if (nextPlanningMode === planningMode) return;
 
     setPlanningMode(nextPlanningMode);
@@ -84,13 +120,14 @@ export function ProjectPlanner() {
         ? "Planning mode on — pricing hidden"
         : "Pricing mode on — pricing visible",
     );
-  };
+  }, [planningMode, setPlanningMode, showToast]);
 
   const resetWorkspace = () => {
     importRequestRef.current += 1;
     printSessionRef.current?.finish(false);
     dispatch(workspaceActions.replaceWorkspace(initialWorkspace()));
     setPlanningMode(false);
+    resetTheme();
     setView("internal");
     setEditingPerson(null);
     setIsNewPerson(false);
@@ -102,7 +139,7 @@ export function ProjectPlanner() {
     showToast("Preset restored — changes remain session-only");
   };
 
-  const importProject = async (file: File) => {
+  const importProject = useCallback(async (file: File) => {
     const requestId = ++importRequestRef.current;
     if (file.size > MAX_IMPORT_BYTES) {
       showToast("That project file is too large to import.");
@@ -127,7 +164,7 @@ export function ProjectPlanner() {
       if (requestId !== importRequestRef.current) return;
       showToast("That file is not a valid Project Planner workspace");
     }
-  };
+  }, [dispatch, showToast]);
 
   const exportProject = () => {
     if (planningMode) {
@@ -191,7 +228,7 @@ export function ProjectPlanner() {
     printSessionRef.current?.finish(false);
   }, []);
 
-  const openNewPerson = () => {
+  const openNewPerson = useCallback(() => {
     setEditingPerson(
       makePerson({
         name: "",
@@ -202,7 +239,72 @@ export function ProjectPlanner() {
       }),
     );
     setIsNewPerson(true);
-  };
+  }, []);
+
+  const editPerson = useCallback((person: Person) => {
+    setEditingPerson(person);
+    setIsNewPerson(false);
+  }, []);
+
+  const patchProject = useCallback((patch: ProjectPatch) => {
+    dispatch(workspaceActions.patchProject(patch));
+  }, [dispatch]);
+
+  const changeProjectName = useCallback((projectName: string) => {
+    dispatch(workspaceActions.patchProject({ projectName }));
+  }, [dispatch]);
+
+  const openResetWorkspace = useCallback(() => {
+    setResetWorkspaceOpen(true);
+  }, []);
+
+  const openExport = useCallback(() => {
+    setExportOpen(true);
+  }, []);
+
+  const addModifier = useCallback(() => {
+    dispatch(workspaceActions.addModifier(planningMode ? "planning" : "pricing"));
+  }, [dispatch, planningMode]);
+
+  const updateModifier = useCallback((modifierId: string, patch: ModifierPatch) => {
+    dispatch(workspaceActions.updateModifier(modifierId, patch));
+  }, [dispatch]);
+
+  const removeModifier = useCallback((modifierId: string) => {
+    dispatch(workspaceActions.removeModifier(modifierId));
+  }, [dispatch]);
+
+  const addExpense = useCallback(() => {
+    dispatch(workspaceActions.addExpense());
+  }, [dispatch]);
+
+  const updateExpense = useCallback((expenseId: string, patch: ExpensePatch) => {
+    dispatch(workspaceActions.updateExpense(expenseId, patch));
+  }, [dispatch]);
+
+  const removeExpense = useCallback((expenseId: string) => {
+    dispatch(workspaceActions.removeExpense(expenseId));
+  }, [dispatch]);
+
+  const addPhase = useCallback(() => {
+    dispatch(workspaceActions.addPhase());
+  }, [dispatch]);
+
+  const updatePhase = useCallback((phaseId: string, patch: PhasePatch) => {
+    dispatch(workspaceActions.updatePhase(phaseId, patch));
+  }, [dispatch]);
+
+  const removePhase = useCallback((phaseId: string) => {
+    dispatch(workspaceActions.removePhase(phaseId));
+  }, [dispatch]);
+
+  const assignPerson = useCallback((phaseId: string, personId: string) => {
+    dispatch(workspaceActions.assignPerson(phaseId, personId));
+  }, [dispatch]);
+
+  const unassignPerson = useCallback((phaseId: string, personId: string) => {
+    dispatch(workspaceActions.unassignPerson(phaseId, personId));
+  }, [dispatch]);
 
   const closePersonEditor = () => {
     setEditingPerson(null);
@@ -226,24 +328,25 @@ export function ProjectPlanner() {
       className={`app-shell ${planningMode ? "planning-mode" : "pricing-mode"}`}
       data-hydrated={hydrated}
     >
-      <AppBackdrop />
+      <StableAppBackdrop />
 
-      <Topbar
+      <StableTopbar
         projectName={project.projectName}
         planningMode={planningMode}
+        theme={theme}
+        usingSystemTheme={usingSystemTheme}
         view={view}
-        onProjectNameChange={(projectName) =>
-          dispatch(workspaceActions.patchProject({ projectName }))
-        }
+        onProjectNameChange={changeProjectName}
         onPlanningModeChange={changePlanningMode}
+        onThemeToggle={toggleTheme}
         onViewChange={setView}
-        onReset={() => setResetWorkspaceOpen(true)}
+        onReset={openResetWorkspace}
         onImport={importProject}
-        onExport={() => setExportOpen(true)}
+        onExport={openExport}
       />
 
       {view === "client" ? (
-        <ClientEstimate
+        <StableClientEstimate
           project={project}
           people={workspace.people}
           calculation={calculation}
@@ -251,39 +354,29 @@ export function ProjectPlanner() {
         />
       ) : (
         <>
-          <OverviewMetrics
+          <StableOverviewMetrics
             project={project}
             people={workspace.people}
             calculation={calculation}
             planningMode={planningMode}
           />
 
-          <ProjectSettings
+          <StableProjectSettings
             project={project}
             calculation={calculation}
             planningMode={planningMode}
             maximizedPanel={maximizedProjectPanel}
             onMaximizedPanelChange={setMaximizedProjectPanel}
-            onProjectChange={(patch) => dispatch(workspaceActions.patchProject(patch))}
-            onAddModifier={() =>
-              dispatch(workspaceActions.addModifier(planningMode ? "planning" : "pricing"))
-            }
-            onUpdateModifier={(modifierId, patch) =>
-              dispatch(workspaceActions.updateModifier(modifierId, patch))
-            }
-            onRemoveModifier={(modifierId) =>
-              dispatch(workspaceActions.removeModifier(modifierId))
-            }
-            onAddExpense={() => dispatch(workspaceActions.addExpense())}
-            onUpdateExpense={(expenseId, patch) =>
-              dispatch(workspaceActions.updateExpense(expenseId, patch))
-            }
-            onRemoveExpense={(expenseId) =>
-              dispatch(workspaceActions.removeExpense(expenseId))
-            }
+            onProjectChange={patchProject}
+            onAddModifier={addModifier}
+            onUpdateModifier={updateModifier}
+            onRemoveModifier={removeModifier}
+            onAddExpense={addExpense}
+            onUpdateExpense={updateExpense}
+            onRemoveExpense={removeExpense}
           />
 
-          <PhasesStaffing
+          <StablePhasesStaffing
             project={project}
             people={workspace.people}
             calculation={calculation}
@@ -293,24 +386,15 @@ export function ProjectPlanner() {
             onMaximizedPanelChange={setMaximizedDeliveryPanel}
             onDragOverPhaseChange={setDragOverPhase}
             onAddPerson={openNewPerson}
-            onEditPerson={(person) => {
-              setEditingPerson(person);
-              setIsNewPerson(false);
-            }}
-            onAddPhase={() => dispatch(workspaceActions.addPhase())}
-            onUpdatePhase={(phaseId, patch) =>
-              dispatch(workspaceActions.updatePhase(phaseId, patch))
-            }
-            onRemovePhase={(phaseId) => dispatch(workspaceActions.removePhase(phaseId))}
-            onAssignPerson={(phaseId, personId) =>
-              dispatch(workspaceActions.assignPerson(phaseId, personId))
-            }
-            onUnassignPerson={(phaseId, personId) =>
-              dispatch(workspaceActions.unassignPerson(phaseId, personId))
-            }
+            onEditPerson={editPerson}
+            onAddPhase={addPhase}
+            onUpdatePhase={updatePhase}
+            onRemovePhase={removePhase}
+            onAssignPerson={assignPerson}
+            onUnassignPerson={unassignPerson}
           />
 
-          <DecisionAnalytics
+          <StableDecisionAnalytics
             project={project}
             calculation={calculation}
             planningMode={planningMode}

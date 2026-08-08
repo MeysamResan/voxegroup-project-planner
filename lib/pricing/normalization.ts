@@ -50,6 +50,19 @@ const stringOr = (value: unknown, fallback = ""): string =>
 const finiteOr = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
+const nonNegativeFiniteOr = (value: unknown, fallback: number): number =>
+  Math.max(0, finiteOr(value, fallback));
+
+const boundedFiniteOr = (
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number => Math.min(maximum, Math.max(minimum, finiteOr(value, fallback)));
+
+const wholeNonNegativeFiniteOr = (value: unknown, fallback: number): number =>
+  Math.round(nonNegativeFiniteOr(value, fallback));
+
 const enumOr = <T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -94,7 +107,7 @@ const normalizePeople = (value: unknown[]): Person[] => {
       location: stringOr(item.location, "Baghdad, Iraq"),
       skills: stringOr(item.skills),
       notes: stringOr(item.notes),
-      hourlyCost: finiteOr(item.hourlyCost, 0),
+      hourlyCost: nonNegativeFiniteOr(item.hourlyCost, 0),
       color: safeColor(item.color, COLORS[index % COLORS.length]),
     }];
   });
@@ -125,7 +138,7 @@ const normalizePhases = (
     return [{
       id: uniqueId(item.id, "phase", index, usedIds),
       name: stringOr(item.name, "Untitled phase"),
-      days: finiteOr(item.days, 0),
+      days: wholeNonNegativeFiniteOr(item.days, 0),
       // Legacy schedule and per-assignment hours are intentionally discarded.
       assignments: normalizeAssignments(item.assignments, validPersonIds),
     }];
@@ -140,10 +153,10 @@ const normalizeExpenses = (value: unknown[]): Expense[] => {
       id: uniqueId(item.id, "expense", index, usedIds),
       name: stringOr(item.name, "Untitled expense"),
       notes: stringOr(item.notes),
-      amount: finiteOr(item.amount, 0),
+      amount: nonNegativeFiniteOr(item.amount, 0),
       unit: enumOr<ExpenseUnit>(item.unit, EXPENSE_UNITS, "fixed"),
       billing: enumOr<ExpenseBilling>(item.billing, EXPENSE_BILLINGS, "internal"),
-      markup: finiteOr(item.markup, 0),
+      markup: nonNegativeFiniteOr(item.markup, 0),
     }];
   });
 };
@@ -195,23 +208,23 @@ export const normalizeProjectPlan = (
     value.workingDays.filter(
       (day): day is number => typeof day === "number" && Number.isInteger(day) && day >= 0 && day <= 6,
     ),
-  ));
+  )).sort((left, right) => left - right);
   const holidays = Array.from(new Set(
     value.holidays.filter(
       (holiday): holiday is string =>
         typeof holiday === "string" && calendarDateFromString(holiday) !== null,
     ),
-  ));
+  )).sort();
 
   return {
     projectName: value.projectName,
     currency: normalizeCurrency(value.currency),
     startDate: calendarDateFromString(value.startDate) ? value.startDate : DEFAULT_START_DATE,
-    baseHourlyPrice: finiteOr(legacyBaseHourlyPrice, 0),
+    baseHourlyPrice: nonNegativeFiniteOr(legacyBaseHourlyPrice, 0),
     baseHourlyPriceNotes: stringOr(value.baseHourlyPriceNotes),
-    fixedFee: finiteOr(value.fixedFee, 0),
+    fixedFee: nonNegativeFiniteOr(value.fixedFee, 0),
     fixedFeeNotes: stringOr(value.fixedFeeNotes),
-    defaultHours: finiteOr(value.defaultHours, DEFAULT_HOURS_PER_DAY),
+    defaultHours: boundedFiniteOr(value.defaultHours, 0, 24, DEFAULT_HOURS_PER_DAY),
     workingDays,
     holidays,
     phases: normalizePhases(value.phases, validPersonIds),

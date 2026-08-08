@@ -94,7 +94,8 @@ test("fresh SSR defaults to pricing and exposes the complete preset", async () =
     "Schedule & time",
     "Calculated timeline",
     "Calendar span",
-    "Planned effort",
+    "Phase effort",
+    "5 selected",
     "Modifiers",
     "Expenses",
     "Phases & staffing",
@@ -233,6 +234,335 @@ test("workspace and app-shell state stay session-only and reset restores the pre
   );
 });
 
+test("color theme follows the device by default and overrides only for the current page", async () => {
+  const [response, themeHook, planner, topbar, layout, globalStyles, primitiveStyles] =
+    await Promise.all([
+      renderPage(),
+      readFile(
+        new URL("../features/project-planner/hooks/useColorTheme.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../features/project-planner/ProjectPlanner.tsx", import.meta.url), "utf8"),
+      readFile(
+        new URL("../features/project-planner/components/Topbar.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+      readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+    ]);
+  const html = await response.text();
+  const htmlTag = html.match(/<html\b[^>]*>/i)?.[0] ?? "";
+
+  assert.doesNotMatch(htmlTag, /\bdata-theme=/i, "SSR must leave the device scheme in control");
+  assert.match(
+    html,
+    /<button(?=[^>]*\bclass="[^"]*topbar-theme-toggle)(?=[^>]*\bdata-theme="dark")(?=[^>]*\baria-label="Switch to light mode")[^>]*>/i,
+  );
+  assert.match(html, /class="theme-toggle-icons"/i);
+  assert.match(html, /class="lucide lucide-sun theme-toggle-icon theme-toggle-sun"/i);
+  assert.match(html, /class="lucide lucide-moon theme-toggle-icon theme-toggle-moon"/i);
+
+  assert.match(themeHook, /const SYSTEM_THEME_QUERY = "\(prefers-color-scheme: light\)"/);
+  assert.match(
+    themeHook,
+    /const \[themeOverride, setThemeOverride\] = useState<ColorTheme \| null>\(null\)/,
+  );
+  assert.match(themeHook, /const theme = themeOverride \?\? systemTheme/);
+  assert.match(themeHook, /window\.matchMedia\(SYSTEM_THEME_QUERY\)/);
+  assert.match(themeHook, /query\.addEventListener\("change", syncSystemTheme\)/);
+  assert.match(themeHook, /document\.documentElement\.dataset\.theme = nextTheme/);
+  assert.match(themeHook, /delete document\.documentElement\.dataset\.theme/);
+  assert.doesNotMatch(themeHook, /localStorage|sessionStorage|JSON\.(?:parse|stringify)/);
+
+  assert.match(planner, /useColorTheme\(\)/);
+  assert.match(planner, /resetTheme\(\)/);
+  assert.match(planner, /theme=\{theme\}/);
+  assert.match(planner, /usingSystemTheme=\{usingSystemTheme\}/);
+  assert.match(planner, /onThemeToggle=\{toggleTheme\}/);
+  assert.match(topbar, /className="topbar-theme-toggle"/);
+
+  assert.match(globalStyles, /html\s*{[^}]*color-scheme:\s*light dark/);
+  assert.match(globalStyles, /html\[data-theme="light"\]\s*{[^}]*color-scheme:\s*light/);
+  assert.match(globalStyles, /html\[data-theme="dark"\]\s*{[^}]*color-scheme:\s*dark/);
+  assert.match(
+    globalStyles,
+    /@media \(prefers-color-scheme: light\)\s*{\s*html:not\(\[data-theme\]\)/,
+  );
+  assert.match(globalStyles, /--background:\s*light-dark\(#f2eff7, #0a0712\)/);
+  assert.match(globalStyles, /--glass-backdrop-filter:\s*none/);
+  assert.match(
+    globalStyles,
+    /html\[data-theme="light"\]\s*{[^}]*--glass-backdrop-filter:\s*blur\(12px\) saturate\(135%\)/,
+  );
+  assert.match(
+    globalStyles,
+    /@media \(prefers-color-scheme: light\)\s*{\s*html:not\(\[data-theme\]\)\s*{[^}]*--glass-backdrop-filter:\s*blur\(12px\) saturate\(135%\)/,
+  );
+  assert.match(
+    globalStyles,
+    /--glass-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.18\)[\s\S]*?rgba\(238, 233, 245, 0\.06\)/,
+  );
+  assert.match(globalStyles, /\.topbar-theme-toggle\.ui-icon-button\s*{/);
+  assert.match(globalStyles, /\.theme-toggle-icon\s*{[^}]*transition:/);
+  assert.match(primitiveStyles, /System-aware light\/dark adaptation/);
+  assert.match(primitiveStyles, /\.ui-modal\.modal[^}]*background:\s*var\(--dialog-background\)/s);
+
+  assert.match(
+    layout,
+    /media:\s*"\(prefers-color-scheme: light\)",\s*color:\s*"#f2eff7"/,
+  );
+  assert.match(
+    layout,
+    /media:\s*"\(prefers-color-scheme: dark\)",\s*color:\s*"#0a0712"/,
+  );
+});
+
+test("theme changes settle the workspace glass layers at a relaxed pace", async () => {
+  const [themeHook, globalStyles] = await Promise.all([
+    readFile(
+      new URL("../features/project-planner/hooks/useColorTheme.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(
+    themeHook,
+    /const REDUCED_MOTION_QUERY = "\(prefers-reduced-motion: reduce\)"/,
+  );
+  assert.match(themeHook, /window\.matchMedia\(REDUCED_MOTION_QUERY\)\.matches/);
+  assert.match(themeHook, /const FALLBACK_TRANSITION_DURATION_MS = 1_250/);
+  assert.match(themeHook, /{ selector: "\.topbar", name: "theme-topbar" }/);
+  assert.match(themeHook, /{ selector: "\.metric-grid", name: "theme-overview" }/);
+  assert.match(themeHook, /{ selector: "\.settings-card", name: "theme-settings" }/);
+  assert.match(themeHook, /{ selector: "\.phases-card", name: "theme-phases" }/);
+  assert.match(themeHook, /{ selector: "\.decision-card", name: "theme-decision" }/);
+  assert.match(themeHook, /{ selector: "\.client-sheet", name: "theme-client" }/);
+  assert.match(themeHook, /document\.querySelector<HTMLElement>\(selector\)/);
+  assert.match(themeHook, /const MAX_THEME_TRANSITION_LAYERS = 3/);
+  assert.match(themeHook, /const MAX_THEME_LAYER_VIEWPORT_RATIO = 0\.6/);
+  assert.match(themeHook, /element\.getBoundingClientRect\(\)/);
+  assert.match(themeHook, /bounds\.bottom > 0/);
+  assert.match(themeHook, /bounds\.top < viewportHeight/);
+  assert.match(themeHook, /\.slice\(0, MAX_THEME_TRANSITION_LAYERS\)/);
+  assert.match(themeHook, /element\.style\.setProperty\("view-transition-name", name\)/);
+  assert.match(themeHook, /element\.classList\.add\("theme-transition-layer"\)/);
+  assert.match(themeHook, /restoreTransitionLayers\(\)/);
+  assert.match(themeHook, /root\.classList\.add\("theme-transition-active"\)/);
+  assert.match(themeHook, /transitionDocument\.startViewTransition/);
+  assert.match(themeHook, /theme-transition-fallback/);
+  assert.match(themeHook, /transition\.finished\.then\(finishTransition, finishTransition\)/);
+  assert.match(themeHook, /pauseAppMotion\(\)/);
+  assert.match(themeHook, /resumeAppMotion\(\)/);
+  assert.doesNotMatch(themeHook, /getClientRects\(\)/);
+
+  assert.match(
+    globalStyles,
+    /html\.theme-transition-active::view-transition-old\(root\)\s*{[^}]*animation:\s*theme-workspace-out 900ms/,
+  );
+  assert.match(
+    globalStyles,
+    /html\.theme-transition-active::view-transition-new\(root\)\s*{[^}]*animation:\s*theme-workspace-in 1050ms/,
+  );
+  assert.match(
+    globalStyles,
+    /::view-transition-group\(theme-topbar\)[\s\S]*?::view-transition-group\(theme-overview\)[\s\S]*?::view-transition-group\(theme-settings\)[\s\S]*?::view-transition-group\(theme-phases\)[\s\S]*?::view-transition-group\(theme-decision\)[\s\S]*?::view-transition-group\(theme-client\)/,
+  );
+  assert.match(
+    globalStyles,
+    /::view-transition-new\(theme-topbar\)[\s\S]*?--theme-layer-delay:\s*70ms/,
+  );
+  assert.match(
+    globalStyles,
+    /::view-transition-new\(theme-phases\)[\s\S]*?--theme-layer-delay:\s*285ms/,
+  );
+  assert.match(
+    globalStyles,
+    /::view-transition-new\(theme-decision\)[\s\S]*?--theme-layer-delay:\s*360ms/,
+  );
+  assert.match(
+    globalStyles,
+    /animation:\s*theme-glass-layer-in 820ms[\s\S]*?var\(--theme-layer-delay\) both/,
+  );
+  assert.match(
+    globalStyles,
+    /@keyframes theme-glass-layer-in\s*{[\s\S]*?translateY\(16px\) scale\(0\.975\)[\s\S]*?72%[\s\S]*?scale\(1\.002\)/,
+  );
+  const themeKeyframes = globalStyles.slice(
+    globalStyles.indexOf("@keyframes theme-workspace-out"),
+    globalStyles.indexOf("@media (prefers-color-scheme: light)"),
+  );
+  assert.doesNotMatch(themeKeyframes, /filter:/);
+  assert.match(
+    globalStyles,
+    /html\.theme-transition-fallback body\s*{[^}]*animation:\s*theme-workspace-fallback 1050ms/,
+  );
+  assert.match(
+    globalStyles,
+    /html\.theme-transition-fallback \.theme-transition-layer\s*{[^}]*animation:\s*theme-glass-layer-fallback 820ms/,
+  );
+  assert.match(
+    globalStyles,
+    /@media \(prefers-reduced-motion: reduce\)\s*{[\s\S]*?::view-transition-group\(\*\),[\s\S]*?::view-transition-new\(\*\)\s*{[^}]*animation:\s*none !important;/,
+  );
+  assert.doesNotMatch(globalStyles, /theme-scheme-reveal|clip-path:\s*circle\(/);
+});
+
+test("nested light glass layers remain visibly transmissive", async () => {
+  const [globalStyles, primitiveStyles] = await Promise.all([
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+  ]);
+
+  const alphaFrom = (source, pattern, label) => {
+    const match = source.match(pattern);
+    assert.ok(match, `Missing light alpha contract for ${label}`);
+    return Number(match[1]);
+  };
+  const compositeAlpha = (outer, inner) => 1 - (1 - outer) * (1 - inner);
+
+  const outerGlassAlpha = alphaFrom(
+    globalStyles,
+    /--glass-background:\s*linear-gradient\([\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
+    "outer glass",
+  );
+  const settingsAlpha = alphaFrom(
+    primitiveStyles,
+    /:is\(\s*\.settings-column,\s*\.people-sidebar,\s*\.client-price\s*\)\s*{[\s\S]*?background:\s*linear-gradient\([\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
+    "settings panels",
+  );
+  const summaryAlpha = alphaFrom(
+    primitiveStyles,
+    /:is\(\.ui-summary-card, \.ui-summary-card--default\)\s*{[\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
+    "summary cards",
+  );
+  const softCardAlpha = alphaFrom(
+    primitiveStyles,
+    /--ui-surface-soft-card:\s*linear-gradient\([\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
+    "row cards",
+  );
+  const metricAlpha = alphaFrom(
+    globalStyles,
+    /\.metric-card\.glass-panel\s*{[\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
+    "metric cards",
+  );
+
+  assert.ok(outerGlassAlpha <= 0.18);
+  assert.ok(metricAlpha <= 0.2);
+  assert.ok(
+    compositeAlpha(outerGlassAlpha, settingsAlpha) <= 0.25,
+    "Nested settings glass must transmit at least three quarters of the backdrop",
+  );
+  assert.ok(
+    compositeAlpha(outerGlassAlpha, summaryAlpha) <= 0.27,
+    "Nested summary cards must transmit most of the backdrop",
+  );
+  assert.ok(
+    compositeAlpha(outerGlassAlpha, softCardAlpha) <= 0.24,
+    "Rows must remain lighter than a solid card stack",
+  );
+
+  assert.match(
+    globalStyles,
+    /html\[data-theme="light"\]\s*{[^}]*--canvas-opacity:\s*0\.58/,
+  );
+  assert.match(
+    globalStyles,
+    /\.animated-backdrop::before\s*{[\s\S]*?rgba\(108, 67, 207, 0\.26\)[\s\S]*?rgba\(21, 147, 126, 0\.21\)[\s\S]*?rgba\(184, 62, 170, 0\.19\)/,
+  );
+});
+
+test("date pickers, selects, and dialogs share the light glass system", async () => {
+  const [globalStyles, primitiveStyles] = await Promise.all([
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(
+    globalStyles,
+    /--popover-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.22\)[\s\S]*?rgba\(238, 233, 245, 0\.06\)/,
+  );
+  assert.match(
+    globalStyles,
+    /--dialog-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.3\)[\s\S]*?rgba\(238, 233, 245, 0\.12\)/,
+  );
+  assert.match(
+    globalStyles,
+    /html\[data-theme="light"\]\s*{[^}]*--popover-backdrop-filter:\s*blur\(14px\) saturate\(140%\)[^}]*--dialog-backdrop-filter:\s*blur\(16px\) saturate\(135%\)/,
+  );
+  assert.match(
+    globalStyles,
+    /--modal-overlay:\s*light-dark\(rgba\(38, 27, 48, 0\.18\), rgba\(4, 2, 8, 0\.82\)\)/,
+  );
+
+  const selectMenuRule =
+    primitiveStyles.match(/\.ui-select__menu\.glass-select-menu\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(selectMenuRule, /background:\s*var\(--popover-background\)/);
+  assert.match(
+    selectMenuRule,
+    /backdrop-filter:\s*var\(--popover-backdrop-filter\)/,
+  );
+
+  const dateMenuRule =
+    primitiveStyles.match(/\.ui-date-picker__menu\.glass-date-menu\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(dateMenuRule, /var\(--popover-background\)/);
+  assert.match(
+    dateMenuRule,
+    /backdrop-filter:\s*var\(--popover-backdrop-filter\)/,
+  );
+
+  const modalRule =
+    primitiveStyles.match(/\.ui-modal\.modal\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(modalRule, /background:\s*var\(--dialog-background\)/);
+  assert.match(modalRule, /backdrop-filter:\s*var\(--dialog-backdrop-filter\)/);
+
+  const selectedDayRule =
+    primitiveStyles.match(
+      /\.ui-date-picker__menu \.glass-calendar-day\.selected\s*{[^}]*}/,
+    )?.[0] ?? "";
+  assert.match(selectedDayRule, /background:\s*linear-gradient/);
+  assert.match(selectedDayRule, /color:\s*#fff/);
+});
+
+test("saved notes keep the violet button and use only the green status dot", async () => {
+  const [response, globalStyles, primitiveStyles] = await Promise.all([
+    renderPage(),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+  ]);
+  const html = await response.text();
+
+  assert.match(
+    html,
+    /<button(?=[^>]*\bclass="[^"]*note-button[^"]*has-notes)[^>]*>/i,
+    "The preset should exercise the saved-note state",
+  );
+
+  const savedNoteRule =
+    globalStyles.match(/\.note-button\.has-notes\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(savedNoteRule, /border-color:\s*rgba\(168, 140, 255, 0\.2\)/);
+  assert.match(savedNoteRule, /background:\s*rgba\(132, 91, 239, 0\.075\)/);
+  assert.match(savedNoteRule, /color:\s*#bba9e8/);
+
+  const noteThemeRule =
+    primitiveStyles.match(
+      /:is\(\.note-button,\s*\.note-button\.has-notes\)\s*{[^}]*}/,
+    )?.[0] ?? "";
+  assert.match(noteThemeRule, /background:\s*var\(--accent-soft\)/);
+  assert.match(noteThemeRule, /color:\s*var\(--ui-color-violet\)/);
+  assert.doesNotMatch(
+    primitiveStyles,
+    /:is\(\s*\.modifier-target-chip,\s*\.note-button\.has-notes/,
+  );
+
+  const noteDotRule =
+    globalStyles.match(/\.note-button\.has-notes::after\s*{[^}]*}/)?.[0] ?? "";
+  assert.match(noteDotRule, /width:\s*6px/);
+  assert.match(noteDotRule, /height:\s*6px/);
+  assert.match(noteDotRule, /background:\s*var\(--green\)/);
+});
+
 test("Planning/Pricing and Internal/Client use restrained animated segmented controls", async () => {
   const [response, globalStyles, primitiveStyles] = await Promise.all([
     renderPage(),
@@ -309,6 +639,27 @@ test("project settings controls use one standard shared size", async () => {
   assert.match(
     noteSource,
     /<div className=\{cn\([\s\S]*?"ui-noted-number-field"[\s\S]*?<AiNoteEditor[\s\S]*?<\/div>/i,
+  );
+});
+
+test("numeric controls enforce calculation bounds before updating project state", async () => {
+  const [stepperSource, phasesSource] = await Promise.all([
+    readFile(new URL("../components/ui/number-stepper.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../features/project-planner/components/PhasesStaffing.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(
+    stepperSource,
+    /const normalized = normalizeValue\(parsed, min, max\);\s*if \(!Object\.is\(normalized, value\)\) onChange\(normalized\)/,
+    "Typed values must respect min/max before they reach live calculations",
+  );
+  assert.match(
+    phasesSource,
+    /days:\s*Math\.max\(0, Math\.round\(days\)\)/,
+    "Phase duration state must use whole, non-negative workdays",
   );
 });
 
@@ -434,7 +785,7 @@ test("glass hierarchy uses soft tonal separation without hard card dividers", as
   );
 });
 
-test("the live backdrop keeps its effects inside a bounded GPU budget", async () => {
+test("the live backdrop and theme-aware glass effects stay bounded", async () => {
   const [backdropSource, globalStyles, primitiveStyles] = await Promise.all([
     readFile(new URL("../components/app/AppBackdrop.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -442,8 +793,9 @@ test("the live backdrop keeps its effects inside a bounded GPU budget", async ()
   ]);
 
   assert.match(backdropSource, /const ACTIVE_FRAME_RATE = 30/);
-  assert.match(backdropSource, /const IDLE_FRAME_RATE = 24/);
-  assert.match(backdropSource, /const OBSCURED_FRAME_RATE = 12/);
+  assert.match(backdropSource, /const IDLE_FRAME_RATE = 18/);
+  assert.match(backdropSource, /const LIGHT_IDLE_FRAME_RATE = 15/);
+  assert.match(backdropSource, /const OBSCURED_FRAME_RATE = 8/);
   assert.match(backdropSource, /const MAX_CANVAS_PIXELS = 2_400_000/);
   assert.match(backdropSource, /Math\.min\(devicePixelRatio, pixelBudgetRatio\)/);
   assert.match(backdropSource, /Math\.min\(72, Math\.max\(38,/);
@@ -452,13 +804,17 @@ test("the live backdrop keeps its effects inside a bounded GPU budget", async ()
   assert.match(backdropSource, /new Int16Array\(particleCount\)/);
   assert.match(backdropSource, /createCometSprite\(color, length, thickness\)/);
   assert.match(backdropSource, /window\.addEventListener\("scroll", handleScroll/);
+  assert.match(backdropSource, /window\.addEventListener\(APP_MOTION_PAUSE_EVENT/);
+  assert.match(backdropSource, /window\.addEventListener\(APP_MOTION_RESUME_EVENT/);
+  assert.match(backdropSource, /themeTransitionPaused = true;\s*stop\(\)/);
   assert.doesNotMatch(backdropSource, /shadowBlur/);
   assert.doesNotMatch(backdropSource, /RandomAmbientGlows/);
   assert.doesNotMatch(backdropSource, /new Map|new Set/);
 
   const canvasRule = globalStyles.match(/\.live-background-canvas\s*{[^}]*}/)?.[0] ?? "";
   assert.match(canvasRule, /filter:\s*none/);
-  assert.match(canvasRule, /mix-blend-mode:\s*normal/);
+  assert.match(canvasRule, /opacity:\s*var\(--canvas-opacity\)/);
+  assert.match(canvasRule, /mix-blend-mode:\s*var\(--canvas-blend\)/);
   assert.doesNotMatch(globalStyles, /\.ambient(?:-[\w-]+)?\s*{/);
 
   const spectrumRule = globalStyles.match(/\.animated-backdrop::before\s*{[^}]*}/)?.[0] ?? "";
@@ -470,8 +826,8 @@ test("the live backdrop keeps its effects inside a bounded GPU budget", async ()
   assert.doesNotMatch(glowPseudoRule, /animation:/);
 
   const topbarRule = globalStyles.match(/\.topbar\s*{[^}]*}/)?.[0] ?? "";
-  assert.match(topbarRule, /^\s*backdrop-filter:\s*blur/m);
-  assert.match(topbarRule, /^\s*-webkit-backdrop-filter:\s*blur/m);
+  assert.match(topbarRule, /^\s*backdrop-filter:\s*blur\(16px\)/m);
+  assert.match(topbarRule, /^\s*-webkit-backdrop-filter:\s*blur\(16px\)/m);
   assert.doesNotMatch(
     globalStyles.replace(topbarRule, ""),
     /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm,
@@ -479,10 +835,48 @@ test("the live backdrop keeps its effects inside a bounded GPU budget", async ()
   assert.doesNotMatch(primitiveStyles, /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm);
 
   const clientSheetRule = globalStyles.match(/\.client-sheet\.glass-panel\s*{[^}]*}/)?.[0] ?? "";
-  assert.match(clientSheetRule, /backdrop-filter:\s*none/);
+  assert.match(clientSheetRule, /backdrop-filter:\s*var\(--glass-backdrop-filter\)/);
 
   const sectionCardRule = primitiveStyles.match(/\.ui-section-card\.glass-panel\s*{[^}]*}/)?.[0] ?? "";
-  assert.match(sectionCardRule, /backdrop-filter:\s*none/);
+  assert.match(sectionCardRule, /backdrop-filter:\s*var\(--glass-backdrop-filter\)/);
+  assert.match(
+    primitiveStyles,
+    /:is\(\s*\.settings-column,\s*\.people-sidebar,\s*\.client-price\s*\)\s*{[^}]*backdrop-filter:\s*none/,
+  );
+});
+
+test("rendering work stays scoped to visible and changed interface regions", async () => {
+  const [plannerSource, globalStyles, layoutSource, panelButtonSource] = await Promise.all([
+    readFile(
+      new URL("../features/project-planner/ProjectPlanner.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../components/ui/panel-size-button.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  for (const component of [
+    "AppBackdrop",
+    "ClientEstimate",
+    "DecisionAnalytics",
+    "OverviewMetrics",
+    "PhasesStaffing",
+    "ProjectSettings",
+    "Topbar",
+  ]) {
+    assert.match(plannerSource, new RegExp(`const Stable${component} = memo\\(${component}\\)`));
+  }
+  assert.match(plannerSource, /const inputKey = useMemo\([\s\S]*?calculationInputKey\(project, people\)/);
+  assert.match(globalStyles, /@supports \(content-visibility: auto\)/);
+  assert.match(globalStyles, /\.settings-card:not\(\.has-maximized-panel\)[^}]*content-visibility:\s*auto/s);
+  assert.match(globalStyles, /\.decision-card[^}]*contain-intrinsic-size:\s*auto 760px/s);
+  assert.match(panelButtonSource, /view-transition-name", "active-panel"/);
+  assert.doesNotMatch(globalStyles, /view-transition-name:\s*(?:project-settings|delivery-plan)-card/);
+  assert.doesNotMatch(layoutSource, /Geist_Mono|font-geist-mono/);
 });
 
 test("the topbar stays compact and single-row until the narrow mobile breakpoint", async () => {
@@ -498,7 +892,7 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   const mobileBreakpoint = globalStyles.indexOf("@media (max-width: 680px)");
   const narrowMobileBreakpoint = globalStyles.indexOf("@media (max-width: 620px)");
   const phoneBreakpoint = globalStyles.indexOf("@media (max-width: 440px)");
-  const compactPlanningBreakpoint = globalStyles.indexOf("@media (max-width: 410px)");
+  const compactPlanningBreakpoint = globalStyles.indexOf("@media (max-width: 460px)");
   const ultraNarrowBreakpoint = globalStyles.indexOf("@media (max-width: 340px)");
   assert.ok(compactBreakpoint > 0);
   assert.ok(tabletBreakpoint > compactBreakpoint);
@@ -560,15 +954,19 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   assert.match(ultraNarrowStyles, /\.topbar\s*{[^}]*padding-inline:\s*6px/);
   assert.match(
     ultraNarrowStyles,
-    /grid-template-columns:\s*repeat\(2, minmax\(44px, 1fr\)\)/,
+    /grid-template-columns:\s*repeat\(2, minmax\(38px, 1fr\)\)/,
   );
-  assert.match(ultraNarrowStyles, /\.file-actions\s*{[^}]*gap:\s*3px/);
+  assert.match(
+    ultraNarrowStyles,
+    /\.topbar \.topbar-theme-toggle\.ui-icon-button,[\s\S]*?width:\s*38px[^}]*min-width:\s*38px[^}]*min-height:\s*38px[^}]*height:\s*38px/,
+  );
+  assert.match(ultraNarrowStyles, /\.file-actions\s*{[^}]*gap:\s*2px/);
 
   assert.doesNotMatch(compactStyles, /\.topbar \.file-actions \.ui-button__label[\s\S]*?display:\s*none/);
   assert.doesNotMatch(smallTabletStyles, /\.topbar \.file-actions \.ui-button__label[\s\S]*?display:\s*none/);
   assert.match(actionCompactStyles, /\.topbar \.file-actions \.ui-button__label\s*{[^}]*display:\s*none/);
   assert.match(actionCompactStyles, /\.topbar \.file-actions \.button\s*{[^}]*width:\s*44px/);
-  assert.equal(topbarSource.match(/size="md"/g)?.length, 6);
+  assert.equal(topbarSource.match(/size="md"/g)?.length, 7);
   assert.doesNotMatch(topbarSource, /size="lg"/);
   assert.doesNotMatch(topbarSource, /<Switch\b|checkedDescription|uncheckedDescription/);
   assert.match(topbarSource, /className="topbar-planning-toggle"/);
@@ -582,6 +980,10 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   assert.match(topbarSource, /aria-label="Planning mode"/);
   assert.match(topbarSource, /aria-pressed=\{planningMode\}/);
   assert.match(topbarSource, /className="topbar-view-toggle"/);
+  assert.match(topbarSource, /<IconButton[\s\S]*?className="topbar-theme-toggle"/);
+  assert.match(topbarSource, /data-theme=\{theme\}/);
+  assert.match(topbarSource, /label=\{`Switch to \$\{theme === "dark" \? "light" : "dark"\} mode`\}/);
+  assert.match(topbarSource, /className="theme-toggle-icons"/);
   assert.match(topbarSource, /className="topbar-reset"/);
   assert.match(topbarSource, /aria-label="Reset all data"/);
   assert.match(topbarSource, /variant="ghost"[\s\S]*?className="topbar-import"/);
@@ -610,7 +1012,7 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
 test("core pricing features compose the shared UI primitives", async () => {
   const contracts = [
     ["../features/project-planner/ProjectPlanner.tsx", ["Toast"]],
-    ["../features/project-planner/components/Topbar.tsx", ["Button", "SegmentedControl", "TextInput"]],
+    ["../features/project-planner/components/Topbar.tsx", ["Button", "IconButton", "SegmentedControl", "TextInput"]],
     [
       "../features/project-planner/components/ResetWorkspaceDialog.tsx",
       ["Button", "DialogActions", "Modal"],

@@ -104,6 +104,7 @@ export function GlassDatePicker({
   );
   const triggerRef = useRef<HTMLButtonElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
+  const positionFrameRef = useRef<number | null>(null);
   const calendarId = useId();
   const selectedKey = selectedDate ? dateKey(selectedDate) : "";
   const todayKey = dateKey(today);
@@ -145,57 +146,85 @@ export function GlassDatePicker({
             viewportPadding,
             Math.min(rect.bottom + gap, window.innerHeight - estimatedHeight - viewportPadding),
           );
-    setCalendarStyle({
+    const nextStyle: CSSProperties = {
       left: Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - width - viewportPadding)),
       top,
       width,
       maxHeight: window.innerHeight - viewportPadding * 2,
+    };
+    setCalendarStyle((currentStyle) => (
+      currentStyle.left === nextStyle.left
+      && currentStyle.top === nextStyle.top
+      && currentStyle.width === nextStyle.width
+      && currentStyle.maxHeight === nextStyle.maxHeight
+        ? currentStyle
+        : nextStyle
+    ));
+  }, []);
+
+  const cancelPositionFrame = useCallback(() => {
+    if (positionFrameRef.current === null) return;
+    window.cancelAnimationFrame(positionFrameRef.current);
+    positionFrameRef.current = null;
+  }, []);
+
+  const scheduleCalendarPosition = useCallback(() => {
+    if (positionFrameRef.current !== null) return;
+    positionFrameRef.current = window.requestAnimationFrame(() => {
+      positionFrameRef.current = null;
+      positionCalendar();
     });
-  }, [setCalendarStyle]);
+  }, [positionCalendar]);
+
+  const closeCalendar = useCallback(() => {
+    cancelPositionFrame();
+    setOpen(false);
+  }, [cancelPositionFrame]);
 
   const openCalendar = useCallback(() => {
     if (disabled) return;
     const startDate = clampToRange(selectedDate ?? today, minDate, maxDate);
     setViewMonth(new Date(startDate.getFullYear(), startDate.getMonth(), 1, 12));
+    cancelPositionFrame();
     positionCalendar();
     setOpen(true);
-  }, [disabled, maxDate, minDate, positionCalendar, selectedDate, setOpen, setViewMonth, today]);
+  }, [cancelPositionFrame, disabled, maxDate, minDate, positionCalendar, selectedDate, today]);
 
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !calendarRef.current?.contains(target)) setOpen(false);
+      if (!triggerRef.current?.contains(target) && !calendarRef.current?.contains(target)) closeCalendar();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        closeCalendar();
         triggerRef.current?.focus();
       }
     };
-    const handlePosition = () => positionCalendar();
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", handlePosition);
-    window.addEventListener("scroll", handlePosition, true);
-    const frame = window.requestAnimationFrame(() => {
+    window.addEventListener("resize", scheduleCalendarPosition);
+    window.addEventListener("scroll", scheduleCalendarPosition, true);
+    const focusFrame = window.requestAnimationFrame(() => {
       calendarRef.current
         ?.querySelector<HTMLButtonElement>(`[data-date="${focusableKey}"]:not(:disabled)`)
         ?.focus();
     });
     return () => {
-      window.cancelAnimationFrame(frame);
+      cancelPositionFrame();
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", handlePosition);
-      window.removeEventListener("scroll", handlePosition, true);
+      window.removeEventListener("resize", scheduleCalendarPosition);
+      window.removeEventListener("scroll", scheduleCalendarPosition, true);
     };
-  }, [focusableKey, open, positionCalendar]);
+  }, [cancelPositionFrame, closeCalendar, focusableKey, open, scheduleCalendarPosition]);
 
   const chooseDate = (date: Date) => {
     if (!isWithinRange(date, minDate, maxDate)) return;
     onChange(dateKey(date));
-    setOpen(false);
+    closeCalendar();
     triggerRef.current?.focus();
   };
 
@@ -251,7 +280,7 @@ export function GlassDatePicker({
           style={calendarStyle}
           onBlur={() => window.requestAnimationFrame(() => {
             const active = document.activeElement;
-            if (!calendarRef.current?.contains(active) && active !== triggerRef.current) setOpen(false);
+            if (!calendarRef.current?.contains(active) && active !== triggerRef.current) closeCalendar();
           })}
         >
           <div className="glass-calendar-header ui-date-picker__header">
@@ -330,7 +359,7 @@ export function GlassDatePicker({
                 type="button"
                 onClick={() => {
                   onChange("");
-                  setOpen(false);
+                  closeCalendar();
                   triggerRef.current?.focus();
                 }}
               >
@@ -360,7 +389,7 @@ export function GlassDatePicker({
         aria-controls={calendarId}
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => open ? setOpen(false) : openCalendar()}
+        onClick={() => open ? closeCalendar() : openCalendar()}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
             event.preventDefault();

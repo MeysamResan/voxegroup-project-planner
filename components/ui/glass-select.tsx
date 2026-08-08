@@ -46,6 +46,7 @@ export function GlassSelect<Value extends string = string>({
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const positionFrameRef = useRef<number | null>(null);
   const menuId = useId();
   const selected = options.find((option) => option.value === value);
 
@@ -59,7 +60,7 @@ export function GlassSelect<Value extends string = string>({
     const maxHeight = Math.min(320, Math.max(160, window.innerHeight - viewportPadding * 2));
     const menuWidth = Math.max(rect.width, 190);
     const openAbove = availableBelow < 180 && rect.top > availableBelow;
-    setMenuStyle({
+    const nextStyle: CSSProperties = {
       left: Math.max(
         viewportPadding,
         Math.min(rect.left, window.innerWidth - menuWidth - viewportPadding),
@@ -69,33 +70,60 @@ export function GlassSelect<Value extends string = string>({
         : rect.bottom + gap,
       width: menuWidth,
       maxHeight,
-    });
+    };
+    setMenuStyle((currentStyle) => (
+      currentStyle.left === nextStyle.left
+      && currentStyle.top === nextStyle.top
+      && currentStyle.width === nextStyle.width
+      && currentStyle.maxHeight === nextStyle.maxHeight
+        ? currentStyle
+        : nextStyle
+    ));
   }, [options.length]);
+
+  const cancelPositionFrame = useCallback(() => {
+    if (positionFrameRef.current === null) return;
+    window.cancelAnimationFrame(positionFrameRef.current);
+    positionFrameRef.current = null;
+  }, []);
+
+  const scheduleMenuPosition = useCallback(() => {
+    if (positionFrameRef.current !== null) return;
+    positionFrameRef.current = window.requestAnimationFrame(() => {
+      positionFrameRef.current = null;
+      positionMenu();
+    });
+  }, [positionMenu]);
+
+  const closeMenu = useCallback(() => {
+    cancelPositionFrame();
+    setOpen(false);
+  }, [cancelPositionFrame]);
 
   const openMenu = useCallback(() => {
     if (disabled || options.length === 0) return;
+    cancelPositionFrame();
     positionMenu();
     setOpen(true);
-  }, [disabled, options.length, positionMenu]);
+  }, [cancelPositionFrame, disabled, options.length, positionMenu]);
 
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        closeMenu();
         triggerRef.current?.focus();
       }
     };
-    const handlePosition = () => positionMenu();
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", handlePosition);
-    window.addEventListener("scroll", handlePosition, true);
-    const frame = window.requestAnimationFrame(() => {
+    window.addEventListener("resize", scheduleMenuPosition);
+    window.addEventListener("scroll", scheduleMenuPosition, true);
+    const focusFrame = window.requestAnimationFrame(() => {
       const selectedOption = menuRef.current?.querySelector<HTMLElement>(
         '[role="option"][aria-selected="true"]:not(:disabled)',
       );
@@ -105,18 +133,19 @@ export function GlassSelect<Value extends string = string>({
       (selectedOption ?? firstOption)?.focus();
     });
     return () => {
-      window.cancelAnimationFrame(frame);
+      cancelPositionFrame();
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", handlePosition);
-      window.removeEventListener("scroll", handlePosition, true);
+      window.removeEventListener("resize", scheduleMenuPosition);
+      window.removeEventListener("scroll", scheduleMenuPosition, true);
     };
-  }, [open, positionMenu]);
+  }, [cancelPositionFrame, closeMenu, open, scheduleMenuPosition]);
 
   const choose = (option: GlassOption<Value>) => {
     if (option.disabled) return;
     onChange(option.value);
-    setOpen(false);
+    closeMenu();
     triggerRef.current?.focus();
   };
 
@@ -157,7 +186,7 @@ export function GlassSelect<Value extends string = string>({
           style={menuStyle}
           onBlur={() => window.requestAnimationFrame(() => {
             const active = document.activeElement;
-            if (!menuRef.current?.contains(active) && active !== triggerRef.current) setOpen(false);
+            if (!menuRef.current?.contains(active) && active !== triggerRef.current) closeMenu();
           })}
         >
           {options.map((option) => (
@@ -196,7 +225,7 @@ export function GlassSelect<Value extends string = string>({
         aria-controls={menuId}
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => open ? setOpen(false) : openMenu()}
+        onClick={() => open ? closeMenu() : openMenu()}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();

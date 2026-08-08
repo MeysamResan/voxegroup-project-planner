@@ -5,17 +5,21 @@ import {
   ArrowDownToLine,
   Eye,
   EyeOff,
+  Moon,
   RotateCcw,
+  Sun,
   Upload,
 } from "lucide-react";
 
 import {
   Button,
+  IconButton,
   SegmentedControl,
   TextInput,
   type SegmentedControlOption,
 } from "@/components/ui";
 import type { ViewMode } from "@/lib/pricing/types.ts";
+import type { ColorTheme } from "../hooks/useColorTheme";
 
 type PricingVisibilityMode = "planning" | "pricing";
 
@@ -34,9 +38,12 @@ const VIEW_OPTIONS: ReadonlyArray<SegmentedControlOption<ViewMode>> = [
 export interface TopbarProps {
   projectName: string;
   planningMode: boolean;
+  theme: ColorTheme;
+  usingSystemTheme: boolean;
   view: ViewMode;
   onProjectNameChange: (projectName: string) => void;
   onPlanningModeChange: (planningMode: boolean) => void;
+  onThemeToggle: () => void;
   onViewChange: (view: ViewMode) => void;
   onReset: () => void;
   onImport: (file: File) => void | Promise<void>;
@@ -46,9 +53,12 @@ export interface TopbarProps {
 export function Topbar({
   projectName,
   planningMode,
+  theme,
+  usingSystemTheme,
   view,
   onProjectNameChange,
   onPlanningModeChange,
+  onThemeToggle,
   onViewChange,
   onReset,
   onImport,
@@ -116,6 +126,22 @@ export function Topbar({
             onChange={onViewChange}
             ariaLabel="Interface view"
           />
+          <IconButton
+            size="md"
+            variant="ghost"
+            className="topbar-theme-toggle"
+            data-theme={theme}
+            label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode${
+              usingSystemTheme ? " (currently following your device)" : ""
+            }`}
+            onClick={onThemeToggle}
+          >
+            <span className="theme-toggle-icons" aria-hidden="true">
+              <Sun className="theme-toggle-icon theme-toggle-sun" size={17} />
+              <Moon className="theme-toggle-icon theme-toggle-moon" size={17} />
+            </span>
+          </IconButton>
         </div>
 
         <span className="nav-divider" aria-hidden="true" />

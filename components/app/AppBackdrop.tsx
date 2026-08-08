@@ -2,11 +2,18 @@
 
 import { useEffect, useRef } from "react";
 
+import {
+  APP_MOTION_PAUSE_EVENT,
+  APP_MOTION_RESUME_EVENT,
+} from "@/lib/performance/motion";
+
 const ACTIVE_FRAME_RATE = 30;
-const IDLE_FRAME_RATE = 24;
-const OBSCURED_FRAME_RATE = 12;
+const IDLE_FRAME_RATE = 18;
+const LIGHT_IDLE_FRAME_RATE = 15;
+const OBSCURED_FRAME_RATE = 8;
 const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_FRAME_RATE;
 const IDLE_FRAME_INTERVAL = 1000 / IDLE_FRAME_RATE;
+const LIGHT_IDLE_FRAME_INTERVAL = 1000 / LIGHT_IDLE_FRAME_RATE;
 const OBSCURED_FRAME_INTERVAL = 1000 / OBSCURED_FRAME_RATE;
 const BASE_FRAME_INTERVAL = 1000 / 60;
 const MAX_DELTA_SCALE = 5;
@@ -142,6 +149,7 @@ function LiveBackground() {
     if (!canvas || !context) return;
 
     const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const lightThemePreference = window.matchMedia("(prefers-color-scheme: light)");
     const colors = ["157, 126, 255", "61, 218, 199", "226, 91, 210"];
     const glowColors = [
       "129, 87, 255",
@@ -167,6 +175,7 @@ function LiveBackground() {
     let reducedMotion = motionPreference.matches;
     let isPrinting = false;
     let isScrolling = false;
+    let themeTransitionPaused = false;
     let windowFocused = document.hasFocus();
     let pointerX = -1000;
     let pointerY = -1000;
@@ -587,9 +596,14 @@ function LiveBackground() {
 
     const frameIntervalFor = (timestamp: number) => {
       if (document.body.style.overflow === "hidden") return OBSCURED_FRAME_INTERVAL;
-      return canvas.width * canvas.height > 2_000_000 || timestamp >= activeUntil
-        ? IDLE_FRAME_INTERVAL
-        : ACTIVE_FRAME_INTERVAL;
+      const isIdle = canvas.width * canvas.height > 2_000_000 || timestamp >= activeUntil;
+      if (!isIdle) return ACTIVE_FRAME_INTERVAL;
+
+      const themeOverride = document.documentElement.dataset.theme;
+      const lightGlassActive = themeOverride
+        ? themeOverride === "light"
+        : lightThemePreference.matches;
+      return lightGlassActive ? LIGHT_IDLE_FRAME_INTERVAL : IDLE_FRAME_INTERVAL;
     };
 
     const stop = () => {
@@ -607,7 +621,13 @@ function LiveBackground() {
     };
 
     const renderFrame = (timestamp: number) => {
-      if (document.hidden || !windowFocused || isPrinting || isScrolling) return;
+      if (
+        document.hidden
+        || !windowFocused
+        || isPrinting
+        || isScrolling
+        || themeTransitionPaused
+      ) return;
 
       if (lastDrawTime === 0) {
         lastDrawTime = timestamp;
@@ -635,13 +655,15 @@ function LiveBackground() {
       stop();
       lastDrawTime = 0;
       lastRenderTime = 0;
-      if (!document.hidden && windowFocused && !isPrinting && !isScrolling) {
+      if (
+        !document.hidden
+        && windowFocused
+        && !isPrinting
+        && !isScrolling
+        && !themeTransitionPaused
+      ) {
         animationFrame = window.requestAnimationFrame(renderFrame);
       }
-    };
-
-    const setPausedClass = (paused: boolean) => {
-      document.documentElement.classList.toggle("app-motion-paused", paused);
     };
 
     const handleResize = () => {
@@ -661,63 +683,61 @@ function LiveBackground() {
       pointerY = -1000;
     };
     const handleVisibility = () => {
-      const paused = document.hidden || !windowFocused || isPrinting;
-      setPausedClass(paused);
+      const paused = document.hidden || !windowFocused || isPrinting || themeTransitionPaused;
       if (paused) stop();
       else start();
     };
     const handleWindowBlur = () => {
       windowFocused = false;
-      setPausedClass(true);
       stop();
     };
     const handleWindowFocus = () => {
       windowFocused = true;
       activeUntil = window.performance.now() + ACTIVE_WINDOW;
-      const paused = document.hidden || isPrinting;
-      setPausedClass(paused);
+      const paused = document.hidden || isPrinting || themeTransitionPaused;
       if (!paused) start();
     };
     const handleScroll = () => {
       isScrolling = true;
-      setPausedClass(true);
       stop();
       window.clearTimeout(scrollResumeTimer);
       scrollResumeTimer = window.setTimeout(() => {
         isScrolling = false;
         activeUntil = window.performance.now() + ACTIVE_WINDOW;
-        const paused = document.hidden || !windowFocused || isPrinting;
-        setPausedClass(paused);
+        const paused = document.hidden || !windowFocused || isPrinting || themeTransitionPaused;
         if (!paused) start();
       }, 110);
     };
     const handlePageHide = () => {
-      setPausedClass(true);
       stop();
     };
     const handlePageShow = () => {
       windowFocused = document.hasFocus();
-      const paused = document.hidden || !windowFocused || isPrinting;
-      setPausedClass(paused);
+      const paused = document.hidden || !windowFocused || isPrinting || themeTransitionPaused;
       if (!paused) start();
     };
     const handleBeforePrint = () => {
       isPrinting = true;
-      setPausedClass(true);
       stop();
     };
     const handleAfterPrint = () => {
       isPrinting = false;
-      const paused = document.hidden || !windowFocused;
-      setPausedClass(paused);
+      const paused = document.hidden || !windowFocused || themeTransitionPaused;
       if (!paused) start();
     };
     const handleMotionPreference = (event: MediaQueryListEvent) => {
       reducedMotion = event.matches;
       start();
     };
+    const handleThemeMotionPause = () => {
+      themeTransitionPaused = true;
+      stop();
+    };
+    const handleThemeMotionResume = () => {
+      themeTransitionPaused = false;
+      if (!document.hidden && windowFocused && !isPrinting && !isScrolling) start();
+    };
 
-    setPausedClass(document.hidden || !windowFocused || isPrinting);
     resize();
     start();
     window.addEventListener("resize", handleResize);
@@ -729,6 +749,8 @@ function LiveBackground() {
     window.addEventListener("pageshow", handlePageShow);
     window.addEventListener("beforeprint", handleBeforePrint);
     window.addEventListener("afterprint", handleAfterPrint);
+    window.addEventListener(APP_MOTION_PAUSE_EVENT, handleThemeMotionPause);
+    window.addEventListener(APP_MOTION_RESUME_EVENT, handleThemeMotionResume);
     document.addEventListener("pointerleave", handlePointerLeave);
     document.addEventListener("visibilitychange", handleVisibility);
     motionPreference.addEventListener("change", handleMotionPreference);
@@ -737,7 +759,6 @@ function LiveBackground() {
       stop();
       window.clearTimeout(resizeTimer);
       window.clearTimeout(scrollResumeTimer);
-      document.documentElement.classList.remove("app-motion-paused");
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("scroll", handleScroll);
@@ -747,6 +768,8 @@ function LiveBackground() {
       window.removeEventListener("pageshow", handlePageShow);
       window.removeEventListener("beforeprint", handleBeforePrint);
       window.removeEventListener("afterprint", handleAfterPrint);
+      window.removeEventListener(APP_MOTION_PAUSE_EVENT, handleThemeMotionPause);
+      window.removeEventListener(APP_MOTION_RESUME_EVENT, handleThemeMotionResume);
       document.removeEventListener("pointerleave", handlePointerLeave);
       document.removeEventListener("visibilitychange", handleVisibility);
       motionPreference.removeEventListener("change", handleMotionPreference);

@@ -332,7 +332,9 @@ export function PhasesPanel({
                 min={0}
                 step={1}
                 suffix="days"
-                onChange={(days) => onUpdatePhase(phase.id, { days })}
+                onChange={(days) => onUpdatePhase(phase.id, {
+                  days: Math.max(0, Math.round(days)),
+                })}
               />
 
               <div
@@ -449,7 +451,7 @@ export function PhasesStaffing({
     runPanelViewTransition(() => {
       onMaximizedPanelChange(maximizedPanel === panel ? null : panel);
       onDragOverPhaseChange(null);
-    });
+    }, ".phases-card");
   };
 
   return (

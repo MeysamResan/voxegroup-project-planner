@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
 import "../components/ui/primitives.css";
 
@@ -8,17 +8,15 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
   title: "Project Planner",
   description: "Session-only project planning, pricing, and delivery analytics for Voxe Group.",
   manifest: "/manifest.webmanifest",
   applicationName: "Project Planner",
-  themeColor: "#0a0712",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f2eff7" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0712" },
+  ],
   appleWebApp: {
     capable: true,
     title: "Project Planner",
@@ -40,9 +38,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} antialiased`}>
         {children}
       </body>
     </html>

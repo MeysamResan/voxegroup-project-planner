@@ -56,6 +56,53 @@ test("entity updates cannot change stable IDs", () => {
   assert.equal(updated.project.phases[0].name, "Renamed phase");
 });
 
+test("same-value edits preserve workspace identity and skip downstream work", () => {
+  const workspace = initialWorkspace();
+  const phase = workspace.project.phases[0];
+  const expense = workspace.project.expenses[0];
+  const modifier = workspace.project.modifiers[0];
+  const person = workspace.people[0];
+
+  assert.equal(
+    workspaceReducer(
+      workspace,
+      workspaceActions.patchProject({ projectName: workspace.project.projectName }),
+    ),
+    workspace,
+  );
+  assert.equal(
+    workspaceReducer(workspace, workspaceActions.updatePhase(phase.id, { days: phase.days })),
+    workspace,
+  );
+  assert.equal(
+    workspaceReducer(
+      workspace,
+      workspaceActions.updateExpense(expense.id, { amount: expense.amount }),
+    ),
+    workspace,
+  );
+  assert.equal(
+    workspaceReducer(
+      workspace,
+      workspaceActions.updateModifier(modifier.id, { value: modifier.value }),
+    ),
+    workspace,
+  );
+  assert.equal(
+    workspaceReducer(workspace, workspaceActions.savePerson(person)),
+    workspace,
+  );
+
+  const changed = workspaceReducer(
+    workspace,
+    workspaceActions.updatePhase(phase.id, { days: phase.days + 1 }),
+  );
+  assert.notEqual(changed, workspace);
+  assert.equal(changed.people, workspace.people);
+  assert.equal(changed.project.expenses, workspace.project.expenses);
+  assert.equal(changed.project.modifiers, workspace.project.modifiers);
+});
+
 test("workspace replacement restores a fresh built-in preset", () => {
   const preset = initialWorkspace();
   const edited = workspaceReducer(
