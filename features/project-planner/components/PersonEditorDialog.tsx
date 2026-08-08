@@ -16,15 +16,13 @@ import {
   type ColorOption,
   type GlassOption,
 } from "@/components/ui";
-import { COLORS, PERSON_TYPES } from "@/lib/pricing/constants.ts";
+import { COLORS, PERSON_COLOR_NAMES, PERSON_TYPES } from "@/lib/pricing/constants.ts";
 import { initials } from "@/lib/pricing/formatters.ts";
 import type { Currency, Person, PersonType } from "@/lib/pricing/types.ts";
 
-const COLOR_NAMES = ["Violet", "Pink", "Teal", "Orange", "Blue", "Gold"] as const;
-
 const COLOR_OPTIONS: ReadonlyArray<ColorOption<string>> = COLORS.map((value, index) => ({
   value,
-  label: COLOR_NAMES[index] ?? `Profile color ${index + 1}`,
+  label: PERSON_COLOR_NAMES[index] ?? `Profile color ${index + 1}`,
 }));
 
 const PERSON_TYPE_OPTIONS: ReadonlyArray<GlassOption<PersonType>> = PERSON_TYPES.map((type) => ({

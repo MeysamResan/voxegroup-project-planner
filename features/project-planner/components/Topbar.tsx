@@ -3,10 +3,12 @@
 import { useRef, type ChangeEvent } from "react";
 import {
   ArrowDownToLine,
+  BotMessageSquare,
   Eye,
   EyeOff,
   Moon,
   RotateCcw,
+  Sparkles,
   Sun,
   Upload,
 } from "lucide-react";
@@ -41,6 +43,7 @@ export interface TopbarProps {
   theme: ColorTheme;
   usingSystemTheme: boolean;
   view: ViewMode;
+  assistantOpen: boolean;
   onProjectNameChange: (projectName: string) => void;
   onPlanningModeChange: (planningMode: boolean) => void;
   onThemeToggle: () => void;
@@ -48,6 +51,7 @@ export interface TopbarProps {
   onReset: () => void;
   onImport: (file: File) => void | Promise<void>;
   onExport: () => void;
+  onAssistantToggle: () => void;
 }
 
 export function Topbar({
@@ -56,6 +60,7 @@ export function Topbar({
   theme,
   usingSystemTheme,
   view,
+  assistantOpen,
   onProjectNameChange,
   onPlanningModeChange,
   onThemeToggle,
@@ -63,6 +68,7 @@ export function Topbar({
   onReset,
   onImport,
   onExport,
+  onAssistantToggle,
 }: TopbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -146,29 +152,27 @@ export function Topbar({
 
         <span className="nav-divider" aria-hidden="true" />
 
-        <div className="file-actions">
-          <Button
-            size="md"
-            variant="ghost"
-            className="topbar-reset"
-            aria-label="Reset all data"
-            title="Reset all data"
-            leadingIcon={<RotateCcw size={16} />}
-            onClick={onReset}
-          >
-            Reset
-          </Button>
-          <Button
-            size="md"
-            variant="ghost"
-            className="topbar-import"
-            aria-label="Import project"
-            title="Import project"
-            leadingIcon={<Upload size={16} />}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Import
-          </Button>
+        <div className="file-actions" aria-label="Project actions">
+          <div className="topbar-utility-actions">
+            <IconButton
+              size="md"
+              variant="ghost"
+              className="topbar-reset"
+              label="Reset all data"
+              onClick={onReset}
+            >
+              <RotateCcw size={16} aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              size="md"
+              variant="ghost"
+              className="topbar-import"
+              label="Import project"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload size={16} aria-hidden="true" />
+            </IconButton>
+          </div>
           <Button
             size="md"
             variant="secondary"
@@ -180,6 +184,21 @@ export function Topbar({
           >
             Export
           </Button>
+          <IconButton
+            size="md"
+            variant="accent"
+            className="topbar-assistant"
+            label={assistantOpen ? "Close project copilot" : "Open project copilot"}
+            aria-expanded={assistantOpen}
+            aria-controls="project-assistant-drawer"
+            title={`${assistantOpen ? "Close" : "Open"} project copilot — notes and AI`}
+            onClick={onAssistantToggle}
+          >
+            <span className="topbar-assistant-glyph" aria-hidden="true">
+              <BotMessageSquare size={19} />
+              <Sparkles className="topbar-assistant-sparkle" size={9} />
+            </span>
+          </IconButton>
         </div>
 
         <input

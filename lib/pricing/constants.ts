@@ -9,7 +9,7 @@ import type {
 
 export const APP_ID = "voxegroup-project-planner" as const;
 export const LEGACY_APP_IDS = ["voxe-pricing-studio"] as const;
-export const SCHEMA_VERSION = 7 as const;
+export const SCHEMA_VERSION = 11 as const;
 export const STORAGE_KEY = "voxegroup-project-planner-v1";
 export const PLANNING_MODE_KEY = "voxegroup-project-planner-planning-mode-v1";
 export const LEGACY_STORAGE_KEYS = [
@@ -47,6 +47,66 @@ export const COLORS = [
   "#ff985c",
   "#5d91ff",
   "#d9b84f",
+  "#b43853",
+  "#3d741f",
+  "#4f55ae",
+  "#04758c",
+  "#ad4934",
+  "#267052",
+  "#75418f",
+  "#8c570d",
+  "#2e5eb7",
+  "#a9346a",
+  "#5f7010",
+  "#007782",
+  "#974333",
+  "#4b657d",
+] as const;
+
+export const PERSON_COLOR_NAMES = [
+  "Violet",
+  "Pink",
+  "Teal",
+  "Orange",
+  "Blue",
+  "Gold",
+  "Red",
+  "Green",
+  "Indigo",
+  "Cyan",
+  "Coral",
+  "Forest",
+  "Plum",
+  "Amber",
+  "Azure",
+  "Rose",
+  "Olive",
+  "Turquoise",
+  "Brick",
+  "Slate",
+] as const;
+
+export const PHASE_TONES = [
+  { light: "#6741c6", dark: "#aa8cff" },
+  { light: "#067b70", dark: "#55d6c1" },
+  { light: "#a84d16", dark: "#f3a064" },
+  { light: "#266db2", dark: "#73b4f3" },
+  { light: "#b43853", dark: "#f67b8e" },
+  { light: "#80670b", dark: "#e6c75c" },
+  { light: "#96358f", dark: "#e182dc" },
+  { light: "#3d741f", dark: "#92d36e" },
+  { light: "#4f55ae", dark: "#99a0f5" },
+  { light: "#04758c", dark: "#65c9df" },
+  { light: "#ad4934", dark: "#f28b74" },
+  { light: "#267052", dark: "#70caa1" },
+  { light: "#75418f", dark: "#c491dc" },
+  { light: "#8c570d", dark: "#e7ad59" },
+  { light: "#2e5eb7", dark: "#83aaff" },
+  { light: "#a9346a", dark: "#f080b0" },
+  { light: "#5f7010", dark: "#bbcf68" },
+  { light: "#007782", dark: "#5bd3d9" },
+  { light: "#974333", dark: "#e68270" },
+  { light: "#4b657d", dark: "#96b8d4" },
 ] as const;
 
 export const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

@@ -1,6 +1,15 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AppBackdrop } from "@/components/app/AppBackdrop";
 import { Toast } from "@/components/ui";
@@ -10,6 +19,7 @@ import {
   calculationInputKey,
   initialWorkspace,
   makePerson,
+  nextPersonColor,
   normalizeWorkspace,
   safeFilename,
   workspaceActions,
@@ -18,32 +28,46 @@ import {
   type ModifierPatch,
   type Person,
   type PhasePatch,
+  type PhaseTaskPatch,
   type ProjectPlan,
   type ProjectPatch,
   type ProjectSettingsPanel,
   type ViewMode,
 } from "@/lib/pricing";
 
-import {
-  ClientEstimate,
-  DecisionAnalytics,
-  ExportDialog,
-  OverviewMetrics,
-  PersonEditorDialog,
-  PhasesStaffing,
-  ProjectSettings,
-  ResetWorkspaceDialog,
-  Topbar,
-} from "./components";
+import { ClientEstimate } from "./components/ClientEstimate";
+import { DecisionAnalytics } from "./components/DecisionAnalytics";
+import { OverviewMetrics } from "./components/OverviewMetrics";
+import { PhasesStaffing } from "./components/PhasesStaffing";
+import { ProjectSettings } from "./components/ProjectSettings";
+import { Topbar } from "./components/Topbar";
 import {
   useColorTheme,
   useLegacyBrowserCleanup,
   useProjectWorkspace,
   useToast,
+  useWorkspaceTransition,
 } from "./hooks";
 
 const MAX_IMPORT_BYTES = 5_000_000;
 const PRINT_RESTORE_FALLBACK_MS = 1_000;
+
+const ExportDialog = lazy(async () => {
+  const imported = await import("./components/ExportDialog");
+  return { default: imported.ExportDialog };
+});
+const PersonEditorDialog = lazy(async () => {
+  const imported = await import("./components/PersonEditorDialog");
+  return { default: imported.PersonEditorDialog };
+});
+const ProjectAssistantDrawer = lazy(async () => {
+  const imported = await import("./components/ProjectAssistantDrawer");
+  return { default: imported.ProjectAssistantDrawer };
+});
+const ResetWorkspaceDialog = lazy(async () => {
+  const imported = await import("./components/ResetWorkspaceDialog");
+  return { default: imported.ResetWorkspaceDialog };
+});
 
 const StableAppBackdrop = memo(AppBackdrop);
 const StableClientEstimate = memo(ClientEstimate);
@@ -60,7 +84,21 @@ type PrintSession = {
 function useScenarioCalculation(project: ProjectPlan, people: Person[]) {
   const inputKey = useMemo(
     () => calculationInputKey(project, people),
-    [people, project],
+    // Display-only project edits should not serialize the full calculation model.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      people,
+      project.startDate,
+      project.defaultHours,
+      project.baseHourlyPrice,
+      project.fixedFee,
+      project.manualAdjustment,
+      project.workingDays,
+      project.holidays,
+      project.phases,
+      project.expenses,
+      project.modifiers,
+    ],
   );
   // Every calculation-relevant value is encoded in inputKey. Display-only
   // object changes intentionally keep the previous deterministic result.
@@ -86,41 +124,57 @@ export function ProjectPlanner() {
     setPlanningMode,
     workspace,
   } = useProjectWorkspace();
+  const runWorkspaceTransition = useWorkspaceTransition();
   useLegacyBrowserCleanup();
 
   const [view, setView] = useState<ViewMode>("internal");
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isNewPerson, setIsNewPerson] = useState(false);
-  const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
   const [maximizedProjectPanel, setMaximizedProjectPanel] =
     useState<ProjectSettingsPanel | null>(null);
   const [maximizedDeliveryPanel, setMaximizedDeliveryPanel] =
     useState<DeliveryPanel | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [resetWorkspaceOpen, setResetWorkspaceOpen] = useState(false);
   const importRequestRef = useRef(0);
   const planningModeRef = useRef(planningMode);
   const printSessionRef = useRef<PrintSession | null>(null);
+  const assistantDraftRef = useRef<string | null>(null);
 
   useEffect(() => {
     planningModeRef.current = planningMode;
   }, [planningMode]);
 
   const project = workspace.project;
-  const calculation = useScenarioCalculation(project, workspace.people);
+  const people = workspace.people;
+  const calculation = useScenarioCalculation(project, people);
 
   const changePlanningMode = useCallback((nextPlanningMode: boolean) => {
     if (nextPlanningMode === planningMode) return;
 
-    setPlanningMode(nextPlanningMode);
-    setMaximizedProjectPanel(null);
-    setExportOpen(false);
-    showToast(
-      nextPlanningMode
-        ? "Planning mode on — pricing hidden"
-        : "Pricing mode on — pricing visible",
+    runWorkspaceTransition(
+      () => {
+        setPlanningMode(nextPlanningMode);
+        setMaximizedProjectPanel(null);
+        setExportOpen(false);
+        showToast(
+          nextPlanningMode
+            ? "Planning mode on — pricing hidden"
+            : "Pricing mode on — pricing visible",
+        );
+      },
+      nextPlanningMode ? "forward" : "backward",
     );
-  }, [planningMode, setPlanningMode, showToast]);
+  }, [planningMode, runWorkspaceTransition, setPlanningMode, showToast]);
+
+  const changeView = useCallback((nextView: ViewMode) => {
+    if (nextView === view) return;
+    runWorkspaceTransition(
+      () => setView(nextView),
+      nextView === "client" ? "forward" : "backward",
+    );
+  }, [runWorkspaceTransition, view]);
 
   const resetWorkspace = () => {
     importRequestRef.current += 1;
@@ -131,10 +185,11 @@ export function ProjectPlanner() {
     setView("internal");
     setEditingPerson(null);
     setIsNewPerson(false);
-    setDragOverPhase(null);
     setMaximizedProjectPanel(null);
     setMaximizedDeliveryPanel(null);
     setExportOpen(false);
+    assistantDraftRef.current = null;
+    setAssistantOpen(false);
     setResetWorkspaceOpen(false);
     showToast("Preset restored — changes remain session-only");
   };
@@ -153,6 +208,8 @@ export function ProjectPlanner() {
       const normalized = normalizeWorkspace(JSON.parse(contents) as unknown);
       if (!normalized) throw new Error("Invalid workspace");
       dispatch(workspaceActions.replaceWorkspace(normalized));
+      assistantDraftRef.current = null;
+      setAssistantOpen(false);
       setMaximizedProjectPanel(null);
       setMaximizedDeliveryPanel(null);
       showToast(
@@ -236,10 +293,11 @@ export function ProjectPlanner() {
         type: "Employee",
         department: "Delivery",
         hourlyCost: 0,
+        color: nextPersonColor(people),
       }),
     );
     setIsNewPerson(true);
-  }, []);
+  }, [people]);
 
   const editPerson = useCallback((person: Person) => {
     setEditingPerson(person);
@@ -261,6 +319,35 @@ export function ProjectPlanner() {
   const openExport = useCallback(() => {
     setExportOpen(true);
   }, []);
+
+  const changeAssistantNotes = useCallback((assistantNotesMarkdown: string) => {
+    dispatch(workspaceActions.patchProject({ assistantNotesMarkdown }));
+  }, [dispatch]);
+
+  const stageAssistantNotes = useCallback((assistantNotesMarkdown: string) => {
+    assistantDraftRef.current = assistantNotesMarkdown;
+  }, []);
+
+  const closeAssistant = useCallback(() => {
+    const assistantNotesMarkdown = assistantDraftRef.current;
+    assistantDraftRef.current = null;
+    setAssistantOpen(false);
+    if (
+      assistantNotesMarkdown !== null
+      && assistantNotesMarkdown !== project.assistantNotesMarkdown
+    ) {
+      changeAssistantNotes(assistantNotesMarkdown);
+    }
+  }, [changeAssistantNotes, project.assistantNotesMarkdown]);
+
+  const toggleAssistant = useCallback(() => {
+    if (assistantOpen) {
+      closeAssistant();
+      return;
+    }
+    assistantDraftRef.current = project.assistantNotesMarkdown;
+    setAssistantOpen(true);
+  }, [assistantOpen, closeAssistant, project.assistantNotesMarkdown]);
 
   const addModifier = useCallback(() => {
     dispatch(workspaceActions.addModifier(planningMode ? "planning" : "pricing"));
@@ -306,6 +393,42 @@ export function ProjectPlanner() {
     dispatch(workspaceActions.unassignPerson(phaseId, personId));
   }, [dispatch]);
 
+  const addPhaseTask = useCallback((phaseId: string) => {
+    dispatch(workspaceActions.addPhaseTask(phaseId));
+  }, [dispatch]);
+
+  const updatePhaseTask = useCallback((
+    phaseId: string,
+    taskId: string,
+    patch: PhaseTaskPatch,
+  ) => {
+    dispatch(workspaceActions.updatePhaseTask(phaseId, taskId, patch));
+  }, [dispatch]);
+
+  const removePhaseTask = useCallback((phaseId: string, taskId: string) => {
+    dispatch(workspaceActions.removePhaseTask(phaseId, taskId));
+  }, [dispatch]);
+
+  const assignPhaseTaskPerson = useCallback((
+    phaseId: string,
+    taskId: string,
+    personId: string,
+  ) => {
+    dispatch(workspaceActions.assignPhaseTaskPerson(phaseId, taskId, personId));
+  }, [dispatch]);
+
+  const unassignPhaseTaskPerson = useCallback((
+    phaseId: string,
+    taskId: string,
+    personId: string,
+  ) => {
+    dispatch(workspaceActions.unassignPhaseTaskPerson(phaseId, taskId, personId));
+  }, [dispatch]);
+
+  const rejectPhaseTaskPerson = useCallback((phaseName: string) => {
+    showToast(`Add this person to ${phaseName} before assigning the sub-phase`);
+  }, [showToast]);
+
   const closePersonEditor = () => {
     setEditingPerson(null);
     setIsNewPerson(false);
@@ -325,7 +448,9 @@ export function ProjectPlanner() {
 
   return (
     <main
-      className={`app-shell ${planningMode ? "planning-mode" : "pricing-mode"}`}
+      className={`app-shell ${planningMode ? "planning-mode" : "pricing-mode"}${
+        assistantOpen ? " assistant-dock-open" : ""
+      }`}
       data-hydrated={hydrated}
     >
       <StableAppBackdrop />
@@ -336,96 +461,132 @@ export function ProjectPlanner() {
         theme={theme}
         usingSystemTheme={usingSystemTheme}
         view={view}
+        assistantOpen={assistantOpen}
         onProjectNameChange={changeProjectName}
         onPlanningModeChange={changePlanningMode}
         onThemeToggle={toggleTheme}
-        onViewChange={setView}
+        onViewChange={changeView}
         onReset={openResetWorkspace}
         onImport={importProject}
         onExport={openExport}
+        onAssistantToggle={toggleAssistant}
       />
 
-      {view === "client" ? (
-        <StableClientEstimate
-          project={project}
-          people={workspace.people}
-          calculation={calculation}
-          planningMode={planningMode}
-        />
-      ) : (
-        <>
-          <StableOverviewMetrics
-            project={project}
-            people={workspace.people}
-            calculation={calculation}
-            planningMode={planningMode}
-          />
+      <div
+        className="workspace-content"
+        data-workspace-view={view}
+        data-pricing-visibility={planningMode ? "planning" : "pricing"}
+      >
+        {view === "client" ? (
+            <Suspense fallback={null}>
+              <StableClientEstimate
+                project={project}
+                people={workspace.people}
+                calculation={calculation}
+                planningMode={planningMode}
+              />
+            </Suspense>
+        ) : (
+          <>
+            <StableOverviewMetrics
+              project={project}
+              people={workspace.people}
+              calculation={calculation}
+              planningMode={planningMode}
+            />
 
-          <StableProjectSettings
-            project={project}
-            calculation={calculation}
-            planningMode={planningMode}
-            maximizedPanel={maximizedProjectPanel}
-            onMaximizedPanelChange={setMaximizedProjectPanel}
-            onProjectChange={patchProject}
-            onAddModifier={addModifier}
-            onUpdateModifier={updateModifier}
-            onRemoveModifier={removeModifier}
-            onAddExpense={addExpense}
-            onUpdateExpense={updateExpense}
-            onRemoveExpense={removeExpense}
-          />
+            <StableProjectSettings
+              project={project}
+              calculation={calculation}
+              planningMode={planningMode}
+              maximizedPanel={maximizedProjectPanel}
+              onMaximizedPanelChange={setMaximizedProjectPanel}
+              onProjectChange={patchProject}
+              onAddModifier={addModifier}
+              onUpdateModifier={updateModifier}
+              onRemoveModifier={removeModifier}
+              onAddExpense={addExpense}
+              onUpdateExpense={updateExpense}
+              onRemoveExpense={removeExpense}
+            />
 
-          <StablePhasesStaffing
-            project={project}
-            people={workspace.people}
-            calculation={calculation}
-            planningMode={planningMode}
-            maximizedPanel={maximizedDeliveryPanel}
-            dragOverPhase={dragOverPhase}
-            onMaximizedPanelChange={setMaximizedDeliveryPanel}
-            onDragOverPhaseChange={setDragOverPhase}
-            onAddPerson={openNewPerson}
-            onEditPerson={editPerson}
-            onAddPhase={addPhase}
-            onUpdatePhase={updatePhase}
-            onRemovePhase={removePhase}
-            onAssignPerson={assignPerson}
-            onUnassignPerson={unassignPerson}
-          />
+            <StablePhasesStaffing
+              project={project}
+              people={workspace.people}
+              calculation={calculation}
+              planningMode={planningMode}
+              assistantOpen={assistantOpen}
+              maximizedPanel={maximizedDeliveryPanel}
+              onMaximizedPanelChange={setMaximizedDeliveryPanel}
+              onAddPerson={openNewPerson}
+              onEditPerson={editPerson}
+              onAddPhase={addPhase}
+              onUpdatePhase={updatePhase}
+              onRemovePhase={removePhase}
+              onAssignPerson={assignPerson}
+              onUnassignPerson={unassignPerson}
+              onAddPhaseTask={addPhaseTask}
+              onUpdatePhaseTask={updatePhaseTask}
+              onRemovePhaseTask={removePhaseTask}
+              onAssignPhaseTaskPerson={assignPhaseTaskPerson}
+              onUnassignPhaseTaskPerson={unassignPhaseTaskPerson}
+              onTaskAssignmentRejected={rejectPhaseTaskPerson}
+            />
 
-          <StableDecisionAnalytics
-            project={project}
-            calculation={calculation}
+            <StableDecisionAnalytics
+              project={project}
+              calculation={calculation}
+              planningMode={planningMode}
+            />
+          </>
+        )}
+      </div>
+
+      {editingPerson && (
+        <Suspense fallback={null}>
+          <PersonEditorDialog
+            person={editingPerson}
+            isNew={isNewPerson}
             planningMode={planningMode}
+            currency={project.currency}
+            onChange={setEditingPerson}
+            onClose={closePersonEditor}
+            onSave={savePerson}
+            onDelete={deletePerson}
           />
-        </>
+        </Suspense>
       )}
 
-      <PersonEditorDialog
-        person={editingPerson}
-        isNew={isNewPerson}
-        planningMode={planningMode}
-        currency={project.currency}
-        onChange={setEditingPerson}
-        onClose={closePersonEditor}
-        onSave={savePerson}
-        onDelete={deletePerson}
-      />
-
-      <ResetWorkspaceDialog
-        open={resetWorkspaceOpen}
-        onClose={() => setResetWorkspaceOpen(false)}
-        onReset={resetWorkspace}
-      />
+      {resetWorkspaceOpen && (
+        <Suspense fallback={null}>
+          <ResetWorkspaceDialog
+            open
+            onClose={() => setResetWorkspaceOpen(false)}
+            onReset={resetWorkspace}
+          />
+        </Suspense>
+      )}
 
       {exportOpen && (
-        <ExportDialog
-          planningMode={planningMode}
-          onClose={() => setExportOpen(false)}
-          onPrint={printClientEstimate}
-          onDownload={exportProject}
-        />
+        <Suspense fallback={null}>
+          <ExportDialog
+            planningMode={planningMode}
+            onClose={() => setExportOpen(false)}
+            onPrint={printClientEstimate}
+            onDownload={exportProject}
+          />
+        </Suspense>
+      )}
+
+      {assistantOpen && (
+        <Suspense fallback={null}>
+          <ProjectAssistantDrawer
+            markdown={project.assistantNotesMarkdown}
+            onMarkdownChange={changeAssistantNotes}
+            onMarkdownDraftChange={stageAssistantNotes}
+            onClose={closeAssistant}
+          />
+        </Suspense>
       )}
 
       {toast && <Toast message={toast} />}

@@ -30,8 +30,17 @@ test("person assignment is valid and unique", () => {
 });
 
 test("deleting a person cascades through every phase assignment", () => {
-  const workspace = initialWorkspace();
+  let workspace = initialWorkspace();
   const personId = workspace.people[1].id;
+  const phaseId = workspace.project.phases[0].id;
+  workspace = workspaceReducer(
+    workspace,
+    workspaceActions.addPhaseTask(phaseId, {
+      id: "task-person-cascade",
+      name: "Owned task",
+      assignments: [{ personId }],
+    }),
+  );
   const updated = workspaceReducer(workspace, workspaceActions.deletePerson(personId));
 
   assert.equal(updated.people.some((person) => person.id === personId), false);
@@ -41,6 +50,135 @@ test("deleting a person cascades through every phase assignment", () => {
     )),
     false,
   );
+  assert.equal(
+    updated.project.phases.some((phase) => (
+      phase.tasks.some((task) => (
+        task.assignments.some((assignment) => assignment.personId === personId)
+      ))
+    )),
+    false,
+  );
+});
+
+test("phase tasks use parent-only staffing and keep phase duration in sync", () => {
+  let workspace = initialWorkspace();
+  const phaseId = "phase-task-behavior-test";
+  const taskId = "task-research-plan";
+  const originalDays = 5;
+  const personId = workspace.people[0].id;
+  const outsidePersonId = workspace.people[1].id;
+  const phaseOf = (state) => (
+    state.project.phases.find((phase) => phase.id === phaseId)
+  );
+
+  workspace = workspaceReducer(
+    workspace,
+    workspaceActions.addPhase({
+      id: phaseId,
+      name: "Task behavior test",
+      days: originalDays,
+      assignments: [{ personId }],
+      tasks: [],
+    }),
+  );
+
+  workspace = workspaceReducer(
+    workspace,
+    workspaceActions.addPhaseTask(phaseId, {
+      id: taskId,
+      name: "Research plan",
+    }),
+  );
+  assert.deepEqual(phaseOf(workspace).tasks, [{
+    id: taskId,
+    name: "Research plan",
+    notes: "",
+    days: originalDays,
+    assignments: [],
+  }]);
+  assert.equal(phaseOf(workspace).days, originalDays);
+
+  assert.equal(
+    workspaceReducer(
+      workspace,
+      workspaceActions.assignPhaseTaskPerson(phaseId, taskId, outsidePersonId),
+    ),
+    workspace,
+  );
+
+  const assigned = workspaceReducer(
+    workspace,
+    workspaceActions.assignPhaseTaskPerson(phaseId, taskId, personId),
+  );
+  assert.deepEqual(phaseOf(assigned).tasks[0].assignments, [{ personId }]);
+  assert.equal(phaseOf(assigned).assignments, phaseOf(workspace).assignments);
+  assert.equal(
+    workspaceReducer(
+      assigned,
+      workspaceActions.assignPhaseTaskPerson(phaseId, taskId, personId),
+    ),
+    assigned,
+  );
+
+  let updated = workspaceReducer(
+    assigned,
+    workspaceActions.updatePhaseTask(phaseId, taskId, {
+      name: "Interview plan",
+      notes: "Confirm participants before scheduling.",
+      days: 3,
+    }),
+  );
+  assert.equal(phaseOf(updated).tasks[0].name, "Interview plan");
+  assert.equal(phaseOf(updated).tasks[0].notes, "Confirm participants before scheduling.");
+  assert.equal(phaseOf(updated).tasks[0].days, 3);
+  assert.equal(phaseOf(updated).days, 3);
+
+  assert.equal(
+    workspaceReducer(updated, workspaceActions.updatePhase(phaseId, { days: 99 })),
+    updated,
+  );
+
+  updated = workspaceReducer(
+    updated,
+    workspaceActions.addPhaseTask(phaseId, {
+      id: "task-prototype",
+      name: "Prototype",
+    }),
+  );
+  assert.equal(phaseOf(updated).tasks[1].days, 1);
+  assert.equal(phaseOf(updated).days, 4);
+
+  updated = workspaceReducer(
+    updated,
+    workspaceActions.updatePhaseTask(phaseId, "task-prototype", { days: 2 }),
+  );
+  assert.equal(phaseOf(updated).days, 5);
+
+  const unassignedFromPhase = workspaceReducer(
+    updated,
+    workspaceActions.unassignPerson(phaseId, personId),
+  );
+  assert.deepEqual(phaseOf(unassignedFromPhase).tasks[0].assignments, []);
+  assert.equal(
+    phaseOf(unassignedFromPhase).assignments.some(
+      (assignment) => assignment.personId === personId,
+    ),
+    false,
+  );
+
+  const removed = workspaceReducer(
+    unassignedFromPhase,
+    workspaceActions.removePhaseTask(phaseId, "task-prototype"),
+  );
+  assert.equal(phaseOf(removed).tasks.length, 1);
+  assert.equal(phaseOf(removed).days, 3);
+
+  const removedLast = workspaceReducer(
+    removed,
+    workspaceActions.removePhaseTask(phaseId, taskId),
+  );
+  assert.deepEqual(phaseOf(removedLast).tasks, []);
+  assert.equal(phaseOf(removedLast).days, 3);
 });
 
 test("entity updates cannot change stable IDs", () => {
@@ -95,12 +233,26 @@ test("same-value edits preserve workspace identity and skip downstream work", ()
 
   const changed = workspaceReducer(
     workspace,
-    workspaceActions.updatePhase(phase.id, { days: phase.days + 1 }),
+    workspaceActions.updatePhase(phase.id, { name: `${phase.name} revised` }),
   );
   assert.notEqual(changed, workspace);
   assert.equal(changed.people, workspace.people);
   assert.equal(changed.project.expenses, workspace.project.expenses);
   assert.equal(changed.project.modifiers, workspace.project.modifiers);
+});
+
+test("project Markdown notes update through the standard project patch", () => {
+  const workspace = initialWorkspace();
+  const assistantNotesMarkdown = "# Decisions\n\n- Keep the launch date.";
+  const updated = workspaceReducer(
+    workspace,
+    workspaceActions.patchProject({ assistantNotesMarkdown }),
+  );
+
+  assert.equal(updated.project.assistantNotesMarkdown, assistantNotesMarkdown);
+  assert.notEqual(updated, workspace);
+  assert.equal(updated.people, workspace.people);
+  assert.equal(updated.project.phases, workspace.project.phases);
 });
 
 test("workspace replacement restores a fresh built-in preset", () => {
@@ -130,8 +282,10 @@ test("new phase, expense, and modifier defaults stay consistent", () => {
   assert.deepEqual(workspace.project.phases.at(-1), {
     id: workspace.project.phases.at(-1).id,
     name: "New phase",
+    notes: "",
     days: 5,
     assignments: [],
+    tasks: [],
   });
   assert.deepEqual(workspace.project.expenses.at(-1), {
     id: workspace.project.expenses.at(-1).id,

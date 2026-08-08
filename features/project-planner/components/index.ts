@@ -5,5 +5,6 @@ export * from "./OverviewMetrics";
 export * from "./PersonEditorDialog";
 export * from "./PhasesStaffing";
 export * from "./ProjectSettings";
+export * from "./ProjectAssistantDrawer";
 export * from "./ResetWorkspaceDialog";
 export * from "./Topbar";

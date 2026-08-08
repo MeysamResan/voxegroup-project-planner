@@ -40,11 +40,21 @@ export type Assignment = {
   personId: string;
 };
 
+export type PhaseTask = {
+  id: string;
+  name: string;
+  notes: string;
+  days: number;
+  assignments: Assignment[];
+};
+
 export type Phase = {
   id: string;
   name: string;
+  notes: string;
   days: number;
   assignments: Assignment[];
+  tasks: PhaseTask[];
 };
 
 export type Expense = {
@@ -68,6 +78,7 @@ export type Modifier = {
 
 export type ProjectPlan = {
   projectName: string;
+  assistantNotesMarkdown: string;
   currency: Currency;
   startDate: string;
   baseHourlyPrice: number;
@@ -86,9 +97,16 @@ export type ProjectPlan = {
 
 export type Workspace = {
   app: "voxegroup-project-planner";
-  schemaVersion: 7;
+  schemaVersion: 11;
   people: Person[];
   project: ProjectPlan;
+};
+
+export type PhaseTaskResult = {
+  id: string;
+  days: number;
+  start: string;
+  end: string;
 };
 
 export type PhaseResult = {
@@ -99,6 +117,7 @@ export type PhaseResult = {
   revenue: number;
   start: string;
   end: string;
+  taskResults: PhaseTaskResult[];
 };
 
 export type ExpenseResult = {

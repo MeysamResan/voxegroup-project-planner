@@ -1,25 +1,14 @@
-import { dateFromString } from "./calendar.ts";
+import { calendarDateFromString } from "./calendar.ts";
 import type { Currency, PersonType } from "./types.ts";
 
-const friendlyDateFormatter = new Intl.DateTimeFormat("en", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-const longDateFormatter = new Intl.DateTimeFormat("en", {
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-});
-
-export const calendarMonthFormat = new Intl.DateTimeFormat("en-US", {
+export const calendarMonthFormat = new Intl.DateTimeFormat("en-GB", {
   month: "long",
   year: "numeric",
 });
-export const calendarDateFormat = new Intl.DateTimeFormat("en-US", {
+export const calendarDateFormat = new Intl.DateTimeFormat("en-GB", {
   weekday: "long",
-  month: "long",
-  day: "numeric",
+  day: "2-digit",
+  month: "2-digit",
   year: "numeric",
 });
 
@@ -48,11 +37,17 @@ export const currencyFormat = (currency: Currency, value: number, compact = fals
 
 export const formatCurrency = currencyFormat;
 
-export const friendlyDate = (value: string): string =>
-  value ? friendlyDateFormatter.format(dateFromString(value)) : "—";
+export const dateFormat = (value: string): string => {
+  const date = calendarDateFromString(value);
+  if (!date) return "—";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
+};
 
-export const longDate = (value: string): string =>
-  value ? longDateFormatter.format(dateFromString(value)) : "—";
+export const friendlyDate = dateFormat;
+
+export const longDate = dateFormat;
 
 export const initials = (name: string): string =>
   name

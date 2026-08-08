@@ -200,7 +200,6 @@
     transform var(--ui-duration-fast) var(--ui-ease-standard),
     border-color var(--ui-duration-normal) var(--ui-ease-standard),
     background var(--ui-duration-normal) var(--ui-ease-standard),
-    box-shadow var(--ui-duration-normal) var(--ui-ease-standard),
     color var(--ui-duration-normal) var(--ui-ease-standard);
 }
 
@@ -745,6 +744,40 @@
   font-style: normal;
   line-height: var(--ui-line-height-control);
   white-space: nowrap;
+}
+
+/* Phase durations keep a compact width while matching the standard row height. */
+:is(
+  .ui-number-stepper.phase-days-stepper,
+  .ui-number-stepper.phase-task-days
+) {
+  --ui-control-height: var(--ui-control-height-md);
+  grid-template-columns: 2rem minmax(2rem, 1fr) 2rem;
+}
+
+:is(
+  .ui-number-stepper.phase-days-stepper,
+  .ui-number-stepper.phase-task-days
+) > button:first-child {
+  grid-column: 1;
+  width: 2rem;
+}
+
+:is(
+  .ui-number-stepper.phase-days-stepper,
+  .ui-number-stepper.phase-task-days
+) > input {
+  grid-column: 2;
+  padding-inline: 0.25rem;
+  font-size: var(--ui-font-size-label);
+}
+
+:is(
+  .ui-number-stepper.phase-days-stepper,
+  .ui-number-stepper.phase-task-days
+) > button:last-child {
+  grid-column: 3;
+  width: 2rem;
 }
 
 /* Select and date triggers */
@@ -2325,8 +2358,8 @@
   border-color: var(--ui-color-line);
   background: linear-gradient(
     145deg,
-    light-dark(rgba(255, 255, 255, 0.24), rgba(39, 29, 61, 0.72)),
-    light-dark(rgba(239, 234, 246, 0.1), rgba(14, 10, 25, 0.64))
+    light-dark(rgba(255, 255, 255, 0.9), rgba(39, 29, 61, 0.92)),
+    light-dark(rgba(239, 234, 246, 0.78), rgba(14, 10, 25, 0.9))
   );
   box-shadow: var(--glass-shadow);
 }
@@ -2384,8 +2417,8 @@
   border-color: var(--ui-color-line);
   background: linear-gradient(
     145deg,
-    light-dark(rgba(255, 255, 255, 0.2), rgba(42, 31, 65, 0.62)),
-    light-dark(rgba(235, 229, 243, 0.08), rgba(14, 10, 25, 0.52))
+    light-dark(rgba(255, 255, 255, 0.76), rgba(42, 31, 65, 0.62)),
+    light-dark(rgba(235, 229, 243, 0.62), rgba(14, 10, 25, 0.52))
   );
   box-shadow: 0 12px 34px light-dark(rgba(58, 37, 74, 0.08), rgba(0, 0, 0, 0.13)),
     inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.075));

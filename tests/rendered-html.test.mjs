@@ -79,8 +79,6 @@ test("fresh SSR defaults to pricing and exposes the complete preset", async () =
     "GROUP",
     "Planning",
     "Pricing",
-    "Reset",
-    "Import",
     "Export",
     "Client quote",
     "Estimated cost",
@@ -101,19 +99,30 @@ test("fresh SSR defaults to pricing and exposes the complete preset", async () =
     "Phases & staffing",
     "People",
     "Phases",
-    "Project duration",
-    "Labor cost",
-    "Total project price",
-    "Unique team members",
+    "Sub-phases",
+    "Add sub-phase",
+    "Delivery mix",
+    "Team",
+    "Cost",
+    "Quote",
+    "09/08/2026",
+    "27/10/2026",
+    "DD/MM/YYYY",
     "Decision analytics",
     "Quote reconciliation",
     "Cost & pricing guide",
     "Final quote",
   ]);
+  assert.match(html, /aria-label="Reset all data"/i);
+  assert.match(html, /aria-label="Import project"/i);
 
   assertNotVisible(text, [
     "Pricing controls hidden",
     "Team planning brief",
+    "August 9, 2026",
+    "Aug 9, 2026",
+    "October 27, 2026",
+    "Oct 27, 2026",
   ]);
   assert.doesNotMatch(
     html,
@@ -166,7 +175,9 @@ test("fresh SSR defaults to pricing and exposes the complete preset", async () =
   assert.match(html, /aria-label="Edit AI notes for Delivery contingency"/i);
   assert.match(html, /aria-label="Add person"/i);
   assert.match(html, /aria-label="Add phase"/i);
-  assert.match(html, /aria-label="Phase totals"/i);
+  assert.match(html, /aria-label="Add a sub-phase to Discovery &amp; architecture"/i);
+  assert.match(html, /aria-controls="phase-tasks-phase-discovery-architecture"/i);
+  assert.match(html, /aria-label="Delivery overview"/i);
   assert.match(html, /aria-labelledby="phases-staffing-title"/i);
   for (const panel of ["Commercial", "Modifiers", "Expenses", "People", "Phases"]) {
     assert.match(html, new RegExp(`aria-label="Maximize ${escapeRegExp(panel)}"`, "i"));
@@ -192,6 +203,10 @@ test("workspace and app-shell state stay session-only and reset restores the pre
   assert.match(route, /return\s*<ProjectPlanner\s*\/>/);
   assert.match(planner, /export\s+function\s+ProjectPlanner\s*\(/);
   assert.match(planner, /useProjectWorkspace\s*\(\s*\)/);
+  assert.match(
+    planner,
+    /const openNewPerson = useCallback\([\s\S]*?color: nextPersonColor\(people\)[\s\S]*?\}, \[people\]\)/,
+  );
 
   assert.match(workspaceHook, /useReducer\(workspaceReducer, undefined, initialWorkspace\)/);
   assert.match(
@@ -293,18 +308,18 @@ test("color theme follows the device by default and overrides only for the curre
   assert.match(globalStyles, /--glass-backdrop-filter:\s*none/);
   assert.match(
     globalStyles,
-    /html\[data-theme="light"\]\s*{[^}]*--glass-backdrop-filter:\s*blur\(12px\) saturate\(135%\)/,
+    /html\[data-theme="light"\]\s*{[^}]*--canvas-blend:\s*normal[^}]*--glass-backdrop-filter:\s*none/,
   );
   assert.match(
     globalStyles,
-    /@media \(prefers-color-scheme: light\)\s*{\s*html:not\(\[data-theme\]\)\s*{[^}]*--glass-backdrop-filter:\s*blur\(12px\) saturate\(135%\)/,
+    /@media \(prefers-color-scheme: light\)\s*{\s*html:not\(\[data-theme\]\)\s*{[^}]*--glass-backdrop-filter:\s*none/,
   );
   assert.match(
     globalStyles,
-    /--glass-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.18\)[\s\S]*?rgba\(238, 233, 245, 0\.06\)/,
+    /--glass-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.78\)[\s\S]*?rgba\(238, 233, 245, 0\.66\)/,
   );
   assert.match(globalStyles, /\.topbar-theme-toggle\.ui-icon-button\s*{/);
-  assert.match(globalStyles, /\.theme-toggle-icon\s*{[^}]*transition:/);
+  assert.doesNotMatch(globalStyles, /\.theme-toggle-icon\s*{[^}]*transition:/);
   assert.match(primitiveStyles, /System-aware light\/dark adaptation/);
   assert.match(primitiveStyles, /\.ui-modal\.modal[^}]*background:\s*var\(--dialog-background\)/s);
 
@@ -318,7 +333,7 @@ test("color theme follows the device by default and overrides only for the curre
   );
 });
 
-test("theme changes settle the workspace glass layers at a relaxed pace", async () => {
+test("theme changes crossfade colors without moving interface layers", async () => {
   const [themeHook, globalStyles] = await Promise.all([
     readFile(
       new URL("../features/project-planner/hooks/useColorTheme.ts", import.meta.url),
@@ -332,76 +347,33 @@ test("theme changes settle the workspace glass layers at a relaxed pace", async 
     /const REDUCED_MOTION_QUERY = "\(prefers-reduced-motion: reduce\)"/,
   );
   assert.match(themeHook, /window\.matchMedia\(REDUCED_MOTION_QUERY\)\.matches/);
-  assert.match(themeHook, /const FALLBACK_TRANSITION_DURATION_MS = 1_250/);
-  assert.match(themeHook, /{ selector: "\.topbar", name: "theme-topbar" }/);
-  assert.match(themeHook, /{ selector: "\.metric-grid", name: "theme-overview" }/);
-  assert.match(themeHook, /{ selector: "\.settings-card", name: "theme-settings" }/);
-  assert.match(themeHook, /{ selector: "\.phases-card", name: "theme-phases" }/);
-  assert.match(themeHook, /{ selector: "\.decision-card", name: "theme-decision" }/);
-  assert.match(themeHook, /{ selector: "\.client-sheet", name: "theme-client" }/);
-  assert.match(themeHook, /document\.querySelector<HTMLElement>\(selector\)/);
-  assert.match(themeHook, /const MAX_THEME_TRANSITION_LAYERS = 3/);
-  assert.match(themeHook, /const MAX_THEME_LAYER_VIEWPORT_RATIO = 0\.6/);
-  assert.match(themeHook, /element\.getBoundingClientRect\(\)/);
-  assert.match(themeHook, /bounds\.bottom > 0/);
-  assert.match(themeHook, /bounds\.top < viewportHeight/);
-  assert.match(themeHook, /\.slice\(0, MAX_THEME_TRANSITION_LAYERS\)/);
-  assert.match(themeHook, /element\.style\.setProperty\("view-transition-name", name\)/);
-  assert.match(themeHook, /element\.classList\.add\("theme-transition-layer"\)/);
-  assert.match(themeHook, /restoreTransitionLayers\(\)/);
   assert.match(themeHook, /root\.classList\.add\("theme-transition-active"\)/);
   assert.match(themeHook, /transitionDocument\.startViewTransition/);
-  assert.match(themeHook, /theme-transition-fallback/);
   assert.match(themeHook, /transition\.finished\.then\(finishTransition, finishTransition\)/);
+  assert.doesNotMatch(
+    themeHook,
+    /THEME_TRANSITION_LAYERS|theme-transition-layer|theme-transition-fallback|view-transition-name|getBoundingClientRect/,
+  );
   assert.match(themeHook, /pauseAppMotion\(\)/);
   assert.match(themeHook, /resumeAppMotion\(\)/);
-  assert.doesNotMatch(themeHook, /getClientRects\(\)/);
 
   assert.match(
     globalStyles,
-    /html\.theme-transition-active::view-transition-old\(root\)\s*{[^}]*animation:\s*theme-workspace-out 900ms/,
+    /html\.theme-transition-active::view-transition-old\(root\)\s*{[^}]*animation:\s*theme-color-fade-out 180ms ease both/,
   );
   assert.match(
     globalStyles,
-    /html\.theme-transition-active::view-transition-new\(root\)\s*{[^}]*animation:\s*theme-workspace-in 1050ms/,
+    /html\.theme-transition-active::view-transition-new\(root\)\s*{[^}]*animation:\s*theme-color-fade-in 180ms ease both/,
   );
-  assert.match(
-    globalStyles,
-    /::view-transition-group\(theme-topbar\)[\s\S]*?::view-transition-group\(theme-overview\)[\s\S]*?::view-transition-group\(theme-settings\)[\s\S]*?::view-transition-group\(theme-phases\)[\s\S]*?::view-transition-group\(theme-decision\)[\s\S]*?::view-transition-group\(theme-client\)/,
-  );
-  assert.match(
-    globalStyles,
-    /::view-transition-new\(theme-topbar\)[\s\S]*?--theme-layer-delay:\s*70ms/,
-  );
-  assert.match(
-    globalStyles,
-    /::view-transition-new\(theme-phases\)[\s\S]*?--theme-layer-delay:\s*285ms/,
-  );
-  assert.match(
-    globalStyles,
-    /::view-transition-new\(theme-decision\)[\s\S]*?--theme-layer-delay:\s*360ms/,
-  );
-  assert.match(
-    globalStyles,
-    /animation:\s*theme-glass-layer-in 820ms[\s\S]*?var\(--theme-layer-delay\) both/,
-  );
-  assert.match(
-    globalStyles,
-    /@keyframes theme-glass-layer-in\s*{[\s\S]*?translateY\(16px\) scale\(0\.975\)[\s\S]*?72%[\s\S]*?scale\(1\.002\)/,
-  );
-  const themeKeyframes = globalStyles.slice(
-    globalStyles.indexOf("@keyframes theme-workspace-out"),
+  const themeTransitionStyles = globalStyles.slice(
+    globalStyles.indexOf("html.theme-transition-active"),
     globalStyles.indexOf("@media (prefers-color-scheme: light)"),
   );
-  assert.doesNotMatch(themeKeyframes, /filter:/);
-  assert.match(
-    globalStyles,
-    /html\.theme-transition-fallback body\s*{[^}]*animation:\s*theme-workspace-fallback 1050ms/,
+  assert.doesNotMatch(
+    themeTransitionStyles,
+    /transform:|translate|scale|theme-glass|theme-workspace|--theme-layer-delay/,
   );
-  assert.match(
-    globalStyles,
-    /html\.theme-transition-fallback \.theme-transition-layer\s*{[^}]*animation:\s*theme-glass-layer-fallback 820ms/,
-  );
+  assert.doesNotMatch(globalStyles, /theme-transition-fallback|theme-transition-layer/);
   assert.match(
     globalStyles,
     /@media \(prefers-reduced-motion: reduce\)\s*{[\s\S]*?::view-transition-group\(\*\),[\s\S]*?::view-transition-new\(\*\)\s*{[^}]*animation:\s*none !important;/,
@@ -409,7 +381,7 @@ test("theme changes settle the workspace glass layers at a relaxed pace", async 
   assert.doesNotMatch(globalStyles, /theme-scheme-reveal|clip-path:\s*circle\(/);
 });
 
-test("nested light glass layers remain visibly transmissive", async () => {
+test("matte light surfaces avoid live blur while retaining layered contrast", async () => {
   const [globalStyles, primitiveStyles] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
@@ -420,8 +392,6 @@ test("nested light glass layers remain visibly transmissive", async () => {
     assert.ok(match, `Missing light alpha contract for ${label}`);
     return Number(match[1]);
   };
-  const compositeAlpha = (outer, inner) => 1 - (1 - outer) * (1 - inner);
-
   const outerGlassAlpha = alphaFrom(
     globalStyles,
     /--glass-background:\s*linear-gradient\([\s\S]*?light-dark\(rgba\(255, 255, 255, ([\d.]+)\)/,
@@ -448,48 +418,41 @@ test("nested light glass layers remain visibly transmissive", async () => {
     "metric cards",
   );
 
-  assert.ok(outerGlassAlpha <= 0.18);
-  assert.ok(metricAlpha <= 0.2);
-  assert.ok(
-    compositeAlpha(outerGlassAlpha, settingsAlpha) <= 0.25,
-    "Nested settings glass must transmit at least three quarters of the backdrop",
-  );
-  assert.ok(
-    compositeAlpha(outerGlassAlpha, summaryAlpha) <= 0.27,
-    "Nested summary cards must transmit most of the backdrop",
-  );
-  assert.ok(
-    compositeAlpha(outerGlassAlpha, softCardAlpha) <= 0.24,
-    "Rows must remain lighter than a solid card stack",
-  );
+  assert.ok(outerGlassAlpha >= 0.7, "Outer light surfaces must remain readable without blur");
+  assert.ok(metricAlpha >= 0.7, "Light metric cards must not depend on backdrop sampling");
+  assert.ok(settingsAlpha <= 0.1, "Nested settings retain subtle tonal separation");
+  assert.ok(summaryAlpha <= 0.12, "Nested summaries retain subtle tonal separation");
+  assert.ok(softCardAlpha <= 0.08, "Rows remain lighter than a solid card stack");
 
   assert.match(
     globalStyles,
-    /html\[data-theme="light"\]\s*{[^}]*--canvas-opacity:\s*0\.58/,
+    /html\[data-theme="light"\]\s*{[^}]*--canvas-opacity:\s*0\.56/,
   );
   assert.match(
     globalStyles,
-    /\.animated-backdrop::before\s*{[\s\S]*?rgba\(108, 67, 207, 0\.26\)[\s\S]*?rgba\(21, 147, 126, 0\.21\)[\s\S]*?rgba\(184, 62, 170, 0\.19\)/,
+    /\.animated-backdrop\s*{[\s\S]*?background:\s*linear-gradient\([\s\S]*?light-dark\(#faf8fc, #0c0914\)[\s\S]*?light-dark\(#f1edf7, #08060e\)/,
   );
+  assert.doesNotMatch(globalStyles, /\.animated-backdrop::before/);
 });
 
 test("date pickers, selects, and dialogs share the light glass system", async () => {
-  const [globalStyles, primitiveStyles] = await Promise.all([
+  const [globalStyles, primitiveStyles, datePickerSource] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+    readFile(new URL("../components/ui/glass-date-picker.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(
     globalStyles,
-    /--popover-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.22\)[\s\S]*?rgba\(238, 233, 245, 0\.06\)/,
+    /--popover-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.96\)[\s\S]*?rgba\(242, 238, 247, 0\.92\)/,
   );
   assert.match(
     globalStyles,
-    /--dialog-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.3\)[\s\S]*?rgba\(238, 233, 245, 0\.12\)/,
+    /--dialog-background:\s*linear-gradient\([\s\S]*?rgba\(255, 255, 255, 0\.97\)[\s\S]*?rgba\(242, 238, 247, 0\.94\)/,
   );
   assert.match(
     globalStyles,
-    /html\[data-theme="light"\]\s*{[^}]*--popover-backdrop-filter:\s*blur\(14px\) saturate\(140%\)[^}]*--dialog-backdrop-filter:\s*blur\(16px\) saturate\(135%\)/,
+    /html\[data-theme="light"\]\s*{[^}]*--popover-backdrop-filter:\s*none[^}]*--dialog-backdrop-filter:\s*none/,
   );
   assert.match(
     globalStyles,
@@ -523,6 +486,9 @@ test("date pickers, selects, and dialogs share the light glass system", async ()
     )?.[0] ?? "";
   assert.match(selectedDayRule, /background:\s*linear-gradient/);
   assert.match(selectedDayRule, /color:\s*#fff/);
+  assert.match(datePickerSource, /placeholder = "DD\/MM\/YYYY"/);
+  assert.match(datePickerSource, /selectedDate \? displayDate\(selectedDate\) : placeholder/);
+  assert.match(datePickerSource, /return `\$\{day\}\/\$\{month\}\/\$\{date\.getFullYear\(\)\}`/);
 });
 
 test("saved notes keep the violet button and use only the green status dot", async () => {
@@ -563,11 +529,19 @@ test("saved notes keep the violet button and use only the green status dot", asy
   assert.match(noteDotRule, /background:\s*var\(--green\)/);
 });
 
-test("Planning/Pricing and Internal/Client use restrained animated segmented controls", async () => {
-  const [response, globalStyles, primitiveStyles] = await Promise.all([
+test("Planning/Pricing and Internal/Client use polished directional transitions", async () => {
+  const [response, globalStyles, primitiveStyles, plannerSource, transitionHook] = await Promise.all([
     renderPage(),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+    readFile(
+      new URL("../features/project-planner/ProjectPlanner.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../features/project-planner/hooks/useWorkspaceTransition.ts", import.meta.url),
+      "utf8",
+    ),
   ]);
   const html = await response.text();
 
@@ -586,7 +560,7 @@ test("Planning/Pricing and Internal/Client use restrained animated segmented con
   assert.doesNotMatch(html, /ui-segmented-control__indicator/i);
   assert.match(
     globalStyles,
-    /\.view-toggle::before\s*{[\s\S]*?width:\s*calc\(50% - 3px\)[\s\S]*?content:\s*""[\s\S]*?transition:\s*transform 220ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/i,
+    /\.view-toggle::before\s*{[\s\S]*?width:\s*calc\(50% - 3px\)[\s\S]*?content:\s*""[\s\S]*?transition:\s*transform 300ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/i,
   );
   assert.match(
     globalStyles,
@@ -606,6 +580,42 @@ test("Planning/Pricing and Internal/Client use restrained animated segmented con
     primitiveStyles,
     /\.ui-segmented-control\.view-toggle::before\s*{[\s\S]*?(?:display:\s*none|content:\s*none)/i,
   );
+  assert.match(plannerSource, /const runWorkspaceTransition = useWorkspaceTransition\(\)/);
+  assert.match(
+    plannerSource,
+    /nextPlanningMode \? "forward" : "backward"/,
+  );
+  assert.match(
+    plannerSource,
+    /nextView === "client" \? "forward" : "backward"/,
+  );
+  assert.match(plannerSource, /onViewChange=\{changeView\}/);
+  assert.match(
+    plannerSource,
+    /className="workspace-content"[\s\S]*?data-workspace-view=\{view\}[\s\S]*?data-pricing-visibility=/,
+  );
+  assert.match(transitionHook, /flushSync\(update\)/);
+  assert.match(transitionHook, /window\.matchMedia\(REDUCED_MOTION_QUERY\)\.matches/);
+  assert.match(
+    transitionHook,
+    /const offset = direction === "forward" \? 14 : -14/,
+  );
+  assert.match(
+    transitionHook,
+    /content\.animate\([\s\S]*?opacity:\s*0\.42[\s\S]*?translate3d\(\$\{offset\}px, 0, 0\)[\s\S]*?duration:\s*WORKSPACE_TRANSITION_DURATION_MS/,
+  );
+  assert.match(transitionHook, /const WORKSPACE_TRANSITION_DURATION_MS = 360/);
+  assert.match(
+    transitionHook,
+    /const WORKSPACE_TRANSITION_EASING = "cubic-bezier\(0\.22, 1, 0\.36, 1\)"/,
+  );
+  assert.match(transitionHook, /animation\.finished\.then\(releaseAnimation, releaseAnimation\)/);
+  assert.doesNotMatch(transitionHook, /startViewTransition|APP_MOTION|getBoundingClientRect/);
+  assert.match(
+    globalStyles,
+    /\.view-toggle button\.active\s*{[\s\S]*?transform:\s*translateY\(-1px\)/,
+  );
+  assert.doesNotMatch(globalStyles, /workspace-transition-(?:active|forward|backward)|workspace-content-in-/);
 });
 
 test("project settings controls use one standard shared size", async () => {
@@ -663,6 +673,241 @@ test("numeric controls enforce calculation bounds before updating project state"
   );
 });
 
+test("sub-phases use synced durations and parent-aware avatar staffing", async () => {
+  const [
+    typesSource,
+    reducerSource,
+    normalizationSource,
+    calculationSource,
+    phasesSource,
+    globalStyles,
+    primitiveStyles,
+  ] =
+    await Promise.all([
+      readFile(new URL("../lib/pricing/types.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/pricing/workspace.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/pricing/normalization.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/pricing/calculation.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../features/project-planner/components/PhasesStaffing.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+      readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(typesSource, /export type PhaseTask = \{[\s\S]*?notes: string[\s\S]*?days: number[\s\S]*?assignments: Assignment\[\]/);
+  assert.match(typesSource, /export type Phase = \{[\s\S]*?notes: string[\s\S]*?tasks: PhaseTask\[\]/);
+  assert.match(typesSource, /taskResults: PhaseTaskResult\[\]/);
+  assert.match(reducerSource, /type: "phase-task\/assign-person"/);
+  assert.match(reducerSource, /if \(!phaseHasPerson \|\| taskHasPerson\) return workspace/);
+  assert.doesNotMatch(reducerSource, /assignmentsIncludingTasks/);
+  assert.match(reducerSource, /days: tasks\.reduce\(\(sum, phaseTask\) => sum \+ phaseTask\.days, 0\)/);
+  assert.match(
+    normalizationSource,
+    /normalizePhaseTasks\(item\.tasks, importedDays, assignedPersonIds\)/,
+  );
+  assert.match(calculationSource, /taskResults: raw\.taskScheduleData\.map/);
+  assert.match(phasesSource, /<span>Sub-phases<\/span>/);
+  assert.match(phasesSource, /placeholder="Sub-phase name"/);
+  assert.match(phasesSource, /onDrop=\{\(event\) => handleTaskDrop\(event, phase, task\)\}/);
+  assert.match(phasesSource, /Drop people/);
+  assert.match(phasesSource, /className="phase-task-days"[\s\S]*?\{ days: Math\.max\(0, Math\.round\(days\)\) \}/);
+  assert.match(phasesSource, /taskResult\?\.start/);
+  assert.match(phasesSource, /is-task-unavailable/);
+  assert.match(phasesSource, /Not assigned to \$\{taskPhase\?\.name\}/);
+  assert.match(phasesSource, /className="phase-duration-summary"/);
+  assert.match(phasesSource, /className="phase-days-stepper"/);
+  assert.match(phasesSource, /<AiNoteButton[\s\S]*?hasNotes=\{Boolean\(phase\.notes\.trim\(\)\)\}/);
+  assert.match(phasesSource, /<AiNoteButton[\s\S]*?hasNotes=\{Boolean\(task\.notes\.trim\(\)\)\}/);
+  assert.match(phasesSource, /className="phase-notes-editor"/);
+  assert.match(phasesSource, /className="phase-task-notes-editor"/);
+  assert.doesNotMatch(phasesSource, /suffix="d"/);
+  assert.match(phasesSource, /className="phase-days-heading">Days<\/span>/);
+  assert.match(globalStyles, /\.phase-days-heading\s*{[^}]*text-align:\s*center/i);
+  assert.match(
+    globalStyles,
+    /\.phase-number-heading,\s*\.phase-number\s*{[^}]*text-align:\s*center/i,
+  );
+  assert.match(globalStyles, /\.phase-duration-summary\s*{[^}]*border:\s*0/i);
+  assert.match(globalStyles, /\.phase-task-row\s*{[^}]*grid-template-columns:\s*var\(--phase-table-columns\)/i);
+  assert.match(
+    primitiveStyles,
+    /\.ui-number-stepper\.phase-days-stepper,[\s\S]*?\.ui-number-stepper\.phase-task-days[\s\S]*?--ui-control-height:\s*var\(--ui-control-height-md\)[\s\S]*?grid-template-columns:\s*2rem minmax\(2rem, 1fr\) 2rem/i,
+  );
+  assert.match(
+    primitiveStyles,
+    /\.ui-number-stepper\.phase-task-days[\s\S]*?> button:last-child\s*{[^}]*grid-column:\s*3[^}]*width:\s*2rem/i,
+  );
+  assert.match(globalStyles, /--phase-action-column-width:\s*114px/);
+  assert.match(globalStyles, /--phase-action-controls-width:\s*98px/);
+  assert.match(globalStyles, /--phase-table-min-width:\s*1112px/);
+  assert.match(globalStyles, /\.phase-table\.planning-phase-table\s*{[^}]*--phase-table-min-width:\s*992px/i);
+  assert.match(
+    globalStyles,
+    /\.phase-task-list\s*{[^}]*gap:\s*6px[^}]*overflow:\s*visible[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-task-row\s*{[^}]*border:\s*0[^}]*border-radius:\s*var\(--ui-radius-md\)[^}]*background:\s*transparent[^}]*box-shadow:\s*none/i,
+  );
+  assert.match(globalStyles, /\.phase-task-row \+ \.phase-task-row\s*{[^}]*border-top:\s*0/i);
+  assert.match(phasesSource, /<AssignmentAvatar[\s\S]*?source=\{\{ phaseId: phase\.id, taskId: null \}\}/);
+  assert.match(phasesSource, /<AssignmentAvatar[\s\S]*?source=\{\{ phaseId: phase\.id, taskId: task\.id \}\}/);
+  assert.doesNotMatch(phasesSource, /taskSize|is-task-avatar/);
+  assert.doesNotMatch(phasesSource, /className="phase-task-name"\s+controlSize="sm"/);
+  assert.doesNotMatch(phasesSource, /assignment-person-name|title=\{`Remove \$\{person\.name\}/);
+  assert.match(phasesSource, /className="assignment-person-popover"[\s\S]*?role="dialog"/);
+  assert.match(phasesSource, /data-person-assignment-drop-zone="true"/);
+  assert.match(phasesSource, /assignmentDropHandledRef\.current = false;[\s\S]*?onUnassignPerson\(source\.phaseId, source\.personId\)/);
+  assert.match(phasesSource, /event\.dataTransfer\.setDragImage\(hiddenDragImage, 0, 0\)/);
+  assert.match(phasesSource, /className=\{`assignment-drag-preview\$\{/);
+  assert.match(globalStyles, /\.assignment-avatar\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*border-radius:\s*999px/i);
+  assert.match(
+    globalStyles,
+    /\.phase-task-assignees\s*{[^}]*min-height:\s*var\(--ui-control-height-md\)[^}]*border:\s*1px dashed var\(--line\)/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row-actions,\s*\.phase-task-actions\s*{[^}]*width:\s*var\(--phase-action-controls-width\)[^}]*gap:\s*10px/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row-actions > \.ui-icon-button,\s*\.phase-task-actions > \.ui-icon-button\s*{[^}]*width:\s*44px[^}]*height:\s*44px/i,
+  );
+  assert.doesNotMatch(primitiveStyles, /\.phase-task-remove\.ui-icon-button--danger\.icon-button/);
+  assert.match(globalStyles, /\.phase-task-row\s*{[^}]*padding:\s*var\(--ui-space-2\) 0/i);
+  assert.match(globalStyles, /\.phase-task-days\.ui-number-stepper\s*{[^}]*--ui-control-height:\s*var\(--ui-control-height-md\)[^}]*min-height:\s*var\(--ui-control-height-md\)/i);
+  assert.match(phasesSource, /className="phase-task-days"[\s\S]*?size="md"/);
+  assert.match(globalStyles, /\.assignment-avatar\.is-dragging\s*{[^}]*border-style:\s*dashed[^}]*opacity:\s*0\.46/i);
+  assert.doesNotMatch(globalStyles, /\.assignment-avatar\.is-remove-armed\s*{/i);
+  assert.match(
+    globalStyles,
+    /\.assignment-drag-preview\.is-remove-armed \.assignment-drag-preview-avatar\s*{[^}]*background:\s*#dd4c63[^}]*animation:\s*assignment-drag-avatar-remove-shake 380ms/i,
+  );
+  assert.doesNotMatch(phasesSource, /assignment-drag-preview-remove/);
+  assert.doesNotMatch(globalStyles, /\.assignment-drag-preview-remove/);
+  assert.match(
+    globalStyles,
+    /\.assignment-drag-preview\.is-removing \.assignment-drag-preview-avatar\s*{[^}]*animation:\s*assignment-drag-avatar-remove-out 220ms/i,
+  );
+  assert.match(globalStyles, /@keyframes assignment-drag-avatar-remove-out/);
+  assert.match(globalStyles, /@keyframes assignment-drag-avatar-remove-shake/);
+  assert.match(phasesSource, /document\.addEventListener\("pointerdown", handlePointerDown, true\)/);
+  assert.match(phasesSource, /selectedTaskRowRef\.current\?\.contains\(target\)/);
+  assert.match(globalStyles, /\.assignment-person-popover\s*{[^}]*position:\s*fixed/i);
+  assert.doesNotMatch(phasesSource, /Sub-phases &amp; tasks|Name this sub-phase or task|days synced/);
+  assert.doesNotMatch(phasesSource, /GlassSelect|Assign person/);
+  assert.match(globalStyles, /\.phase-task-section\s*\{[^}]*grid-column:\s*1 \/ -1/i);
+  assert.match(globalStyles, /\.phase-task-assignees\.drop-active/);
+  assert.match(globalStyles, /\.person-card\.is-task-unavailable\s*{[^}]*opacity:\s*0\.42/i);
+  assert.match(globalStyles, /@keyframes phase-task-reveal/);
+});
+
+test("phase overview replaces verbose totals with a compact delivery chart", async () => {
+  const [phasesSource, globalStyles] = await Promise.all([
+    readFile(
+      new URL("../features/project-planner/components/PhasesStaffing.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(phasesSource, /className="phase-overview-track"[\s\S]*?project\.phases\.map/);
+  assert.match(
+    phasesSource,
+    /style=\{\{[\s\S]*?\.\.\.phaseToneStyle\(index\),[\s\S]*?flexGrow: Math\.max\(phase\.days, 0\.25\)/,
+  );
+  assert.match(
+    phasesSource,
+    /className="phase-overview-duration"[\s\S]*?<strong>\{calculation\.totalWorkingDays\}<\/strong>[\s\S]*?<small>working days<\/small>[\s\S]*?<strong>\{calculation\.calendarDays\}<\/strong>[\s\S]*?<small>calendar days<\/small>/,
+  );
+  assert.match(
+    phasesSource,
+    /className="phase-overview-title"[\s\S]*?<h3>Delivery mix<\/h3>[\s\S]*?calculation\.totalHours/,
+  );
+  assert.doesNotMatch(phasesSource, /phase-overview-stats/);
+  assert.match(phasesSource, /onClick=\{\(\) => onPhaseSelect\(phase\.id\)\}/);
+  assert.match(
+    phasesSource,
+    /className="phase-overview-range"[\s\S]*?<small>Start<\/small>[\s\S]*?longDate\(calculation\.projectStart\)[\s\S]*?<small>End<\/small>[\s\S]*?longDate\(calculation\.projectEnd\)/,
+  );
+  assert.match(
+    phasesSource,
+    /phaseRow\.scrollIntoView\(\{[\s\S]*?behavior: reduceMotion \? "auto" : "smooth"[\s\S]*?inline: "nearest"/,
+  );
+  assert.doesNotMatch(phasesSource, /phaseNameInput|preventScroll|\.select\(\)/);
+  assert.equal(
+    phasesSource.match(/phase-tone-\$\{\s*\(index % PHASE_TONES\.length\) \+ 1\s*\}/g)?.length,
+    2,
+    "phase rows and their delivery segments should use the same rotating tone",
+  );
+  assert.equal(
+    phasesSource.match(/phaseToneStyle\(index\)/g)?.length,
+    2,
+    "phase rows and delivery segments should receive the same theme-aware tone variables",
+  );
+  assert.match(
+    phasesSource,
+    /<dt>Team<\/dt>[\s\S]*?<dt>Labor cost<\/dt>[\s\S]*?<dt>Quote<\/dt>/,
+  );
+  assert.doesNotMatch(
+    phasesSource,
+    /Scheduled delivery effort|Unique team members|Calculated staffing cost|Final quote including commercial adjustments"\s*\n\s*detail=/,
+  );
+  assert.doesNotMatch(phasesSource, /<SummaryGrid|<SummaryCard/);
+  assert.match(
+    globalStyles,
+    /\.phase-overview\s*{[^}]*grid-template-columns:\s*minmax\(340px, 1fr\) auto[^}]*padding:\s*16px 18px 15px/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-overview-duration\s*{[^}]*border-radius:\s*12px[^}]*background:\s*light-dark/i,
+  );
+  assert.match(
+    globalStyles,
+    /\[class\*="phase-tone-"\]\s*\{[^}]*--phase-color:\s*light-dark\([^}]*var\(--phase-color-light[^}]*var\(--phase-color-dark/i,
+  );
+  assert.doesNotMatch(globalStyles, /\.phase-tone-\d+\s*\{/);
+  assert.match(
+    globalStyles,
+    /\.phase-overview-segment\s*\{[^}]*background:\s*var\(--phase-color/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-overview-segment\s*\{[^}]*appearance:\s*none[^}]*cursor:\s*pointer/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-overview-range\s*\{[^}]*justify-content:\s*space-between/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-overview-metrics\s*\{[^}]*border-radius:\s*14px[^}]*background:\s*light-dark/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row\[class\*="phase-tone-"\]\.is-overview-target\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--phase-color\)/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row\[class\*="phase-tone-"\] \.phase-name-cell b\s*\{[^}]*color:\s*var\(--phase-color\)/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row\[class\*="phase-tone-"\] \.phase-date,\s*\.phase-row\[class\*="phase-tone-"\] \.phase-task-date\s*\{[^}]*color:\s*var\(--phase-color\)/i,
+  );
+  assert.match(
+    globalStyles,
+    /\.phase-row\[class\*="phase-tone-"\] \.phase-date > svg,\s*\.phase-row\[class\*="phase-tone-"\] \.phase-task-date i\s*\{[^}]*color:\s*var\(--phase-color\)/i,
+  );
+  assert.doesNotMatch(globalStyles, /\.phase-overview-segment:nth-child/);
+  assert.match(
+    globalStyles,
+    /@media \(max-width:\s*900px\)[\s\S]*?\.phase-overview\s*{[^}]*grid-template-columns:\s*1fr/i,
+  );
+});
+
 test("glass hierarchy uses soft tonal separation without hard card dividers", async () => {
   const [globalStyles, primitiveStyles] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -714,16 +959,12 @@ test("glass hierarchy uses soft tonal separation without hard card dividers", as
   assert.match(repeatedContentRule, /background:\s*var\(--ui-surface-soft-card\)/i);
   assert.doesNotMatch(repeatedContentRule, /border-(?:top|right|bottom|left):/i);
 
-  const phaseTotalsGroupRule =
-    [
-      ...primitiveStyles.matchAll(
-        /\.ui-summary-grid\.phase-totals-summary\s*{[^}]*}/gi,
-      ),
-    ].at(-1)?.[0] ?? "";
-  assert.match(phaseTotalsGroupRule, /border:\s*0/i);
-  assert.match(phaseTotalsGroupRule, /border-radius:\s*var\(--ui-radius-md\)/i);
-  assert.match(phaseTotalsGroupRule, /background:\s*var\(--ui-surface-soft-card\)/i);
-  assert.doesNotMatch(phaseTotalsGroupRule, /border-(?:top|right|bottom|left):/i);
+  const phaseOverviewRule =
+    globalStyles.match(/\.phase-overview\s*{[^}]*}/i)?.[0] ?? "";
+  assert.match(phaseOverviewRule, /border:\s*0/i);
+  assert.match(phaseOverviewRule, /border-radius:\s*18px/i);
+  assert.match(phaseOverviewRule, /background:\s*linear-gradient/i);
+  assert.doesNotMatch(phaseOverviewRule, /border-(?:top|right|bottom|left):/i);
   assert.match(
     primitiveStyles,
     /\.pricing-hidden-state\s*{[^}]*min-height:\s*auto[^}]*border:\s*0[^}]*border-left:\s*2px solid[^}]*border-radius:\s*0[^}]*background:\s*transparent/i,
@@ -739,16 +980,11 @@ test("glass hierarchy uses soft tonal separation without hard card dividers", as
     /\.phase-row\s*\+\s*\.phase-row\s*{[^}]*margin-top:\s*0\.5rem/i,
     "Phase cards should use the same half-rem separation as the other card lists",
   );
-  const flatPhaseTotalsRule =
-    primitiveStyles.match(
-      /\.ui-summary-card\.phase-total-item,[\s\S]*?\.ui-summary-card\.phase-total-price\s*{[^}]*}/i,
-    )?.[0] ?? "";
-  assert.match(flatPhaseTotalsRule, /border:\s*0/i);
-  assert.doesNotMatch(
-    flatPhaseTotalsRule,
-    /border-left:/i,
-    "Auto-fitting totals must not grow stray dividers when they wrap",
-  );
+  const phaseTrackRule =
+    globalStyles.match(/\.phase-overview-track\s*{[^}]*}/i)?.[0] ?? "";
+  assert.match(phaseTrackRule, /display:\s*flex/i);
+  assert.match(phaseTrackRule, /height:\s*16px/i);
+  assert.match(phaseTrackRule, /border-radius:\s*var\(--ui-radius-pill\)/i);
   const clientMetricRule =
     primitiveStyles.match(/\.client-metrics\s*>\s*div\s*{[^}]*}/i)?.[0] ?? "";
   assert.match(clientMetricRule, /border:\s*0/i);
@@ -792,24 +1028,93 @@ test("the live backdrop and theme-aware glass effects stay bounded", async () =>
     readFile(new URL("../components/ui/primitives.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(backdropSource, /const ACTIVE_FRAME_RATE = 30/);
-  assert.match(backdropSource, /const IDLE_FRAME_RATE = 18/);
-  assert.match(backdropSource, /const LIGHT_IDLE_FRAME_RATE = 15/);
-  assert.match(backdropSource, /const OBSCURED_FRAME_RATE = 8/);
-  assert.match(backdropSource, /const MAX_CANVAS_PIXELS = 2_400_000/);
-  assert.match(backdropSource, /Math\.min\(devicePixelRatio, pixelBudgetRatio\)/);
-  assert.match(backdropSource, /Math\.min\(72, Math\.max\(38,/);
-  assert.match(backdropSource, /const MAX_PARTICLE_CONNECTIONS = 2/);
-  assert.match(backdropSource, /const PARTICLE_GRID_SIZE = 158/);
-  assert.match(backdropSource, /new Int16Array\(particleCount\)/);
-  assert.match(backdropSource, /createCometSprite\(color, length, thickness\)/);
-  assert.match(backdropSource, /window\.addEventListener\("scroll", handleScroll/);
-  assert.match(backdropSource, /window\.addEventListener\(APP_MOTION_PAUSE_EVENT/);
-  assert.match(backdropSource, /window\.addEventListener\(APP_MOTION_RESUME_EVENT/);
+  assert.match(backdropSource, /const DARK_FRAME_RATE = 12/);
+  assert.match(backdropSource, /const LIGHT_FRAME_RATE = 10/);
+  assert.match(backdropSource, /const POWER_SAVER_FRAME_RATE = 6/);
+  assert.match(backdropSource, /const MAX_BACKING_SCALE = 0\.58/);
+  assert.match(backdropSource, /const MAX_CANVAS_PIXELS = 360_000/);
+  assert.match(backdropSource, /const MESH_SPRITE_SIZE = 128/);
+  const meshBlueprint = backdropSource.match(
+    /const MESH_BLOBS:[\s\S]*?= \[([\s\S]*?)\n\];/,
+  )?.[1] ?? "";
+  assert.equal((meshBlueprint.match(/\bcolor:/g) ?? []).length, 4);
+  assert.match(
+    backdropSource,
+    /MESH_BLOBS\.map\(\(blob\) => \(\{[\s\S]*?sprite: createMeshSprite\(blob\.color\)/,
+  );
+  assert.equal(
+    (backdropSource.match(/createMeshSprite\(blob\.color\)/g) ?? []).length,
+    1,
+  );
+  const drawMeshSource = backdropSource.match(
+    /const drawMesh = \(\) => \{([\s\S]*?)\n    \};\n\n    const resize/,
+  )?.[1] ?? "";
+  assert.doesNotMatch(drawMeshSource, /createMeshSprite|createRadialGradient|createElement/);
+  assert.match(backdropSource, /Math\.min\(deviceScale, budgetScale\)/);
+  assert.match(
+    backdropSource,
+    /Math\.sqrt\(MAX_CANVAS_PIXELS \/ Math\.max\(1, width \* height\)\)/,
+  );
+  assert.match(backdropSource, /canvas\.width = Math\.max\(1, Math\.floor\(width \* backingScale\)\)/);
+  assert.match(backdropSource, /context\.imageSmoothingQuality = "low"/);
+  assert.match(backdropSource, /const powerSaver = Boolean\(/);
+  assert.match(backdropSource, /performanceNavigator\.connection\?\.saveData/);
+  assert.match(backdropSource, /performanceNavigator\.deviceMemory <= 4/);
+  assert.match(backdropSource, /performanceNavigator\.hardwareConcurrency <= 4/);
+  assert.match(backdropSource, /let staticMotion = motionPreference\.matches/);
+  assert.doesNotMatch(backdropSource, /staticMotion\s*=\s*[^;\n]*powerSaver/);
+  assert.match(
+    backdropSource,
+    /const handleMotionPreference[\s\S]*?staticMotion = event\.matches;[\s\S]*?start\(\)/,
+  );
+  assert.match(backdropSource, /if \(powerSaver\) return POWER_SAVER_FRAME_INTERVAL/);
+  assert.match(
+    backdropSource,
+    /return lightThemeActive\(\) \? LIGHT_FRAME_INTERVAL : DARK_FRAME_INTERVAL/,
+  );
+  assert.match(backdropSource, /if \(!staticMotion\) scheduleNextFrame\(frameInterval\(\)\)/);
+  assert.match(backdropSource, /Math\.min\(elapsed, MAX_FRAME_DELTA\)/);
+  assert.match(backdropSource, /new IntersectionObserver/);
+  assert.match(backdropSource, /new MutationObserver/);
+  const canRenderSource = backdropSource.match(
+    /const canRender = \(\) => \(([\s\S]*?)\n    \);/,
+  )?.[1] ?? "";
+  for (const condition of [
+    /canvasVisible/,
+    /!document\.hidden/,
+    /windowFocused/,
+    /!isPrinting/,
+    /!isScrolling/,
+    /!themeTransitionPaused/,
+  ]) {
+    assert.match(canRenderSource, condition);
+  }
+  for (const listener of [
+    /window\.addEventListener\("scroll", handleScroll/,
+    /window\.addEventListener\("blur", handleWindowBlur/,
+    /window\.addEventListener\("focus", handleWindowFocus/,
+    /window\.addEventListener\("beforeprint", handleBeforePrint/,
+    /window\.addEventListener\("afterprint", handleAfterPrint/,
+    /window\.addEventListener\(APP_MOTION_PAUSE_EVENT/,
+    /window\.addEventListener\(APP_MOTION_RESUME_EVENT/,
+    /document\.addEventListener\("visibilitychange", handleVisibility/,
+  ]) {
+    assert.match(backdropSource, listener);
+  }
+  assert.match(backdropSource, /intersectionObserver\?\.disconnect\(\)/);
+  assert.match(backdropSource, /themeObserver\?\.disconnect\(\)/);
+  assert.match(backdropSource, /window\.removeEventListener\("scroll", handleScroll\)/);
+  assert.match(backdropSource, /document\.removeEventListener\("visibilitychange", handleVisibility\)/);
   assert.match(backdropSource, /themeTransitionPaused = true;\s*stop\(\)/);
-  assert.doesNotMatch(backdropSource, /shadowBlur/);
-  assert.doesNotMatch(backdropSource, /RandomAmbientGlows/);
-  assert.doesNotMatch(backdropSource, /new Map|new Set/);
+  assert.doesNotMatch(
+    backdropSource,
+    /type Particle|type Comet|\bparticles\s*=|\bcomets\s*=|PARTICLE_|drawParticles|drawRibbon|drawComets|createParticleSprite|createCometSprite|pointerSprite|pointerX|pointerY|pointermove|shadowBlur/i,
+  );
+  assert.doesNotMatch(
+    backdropSource,
+    /AMBIENT_MOTION_WINDOW|SCROLL_MOTION_WINDOW|ambientUntil|activeUntil|wakeAmbient/,
+  );
+  assert.doesNotMatch(backdropSource, /backdrop-glow/);
 
   const canvasRule = globalStyles.match(/\.live-background-canvas\s*{[^}]*}/)?.[0] ?? "";
   assert.match(canvasRule, /filter:\s*none/);
@@ -817,19 +1122,15 @@ test("the live backdrop and theme-aware glass effects stay bounded", async () =>
   assert.match(canvasRule, /mix-blend-mode:\s*var\(--canvas-blend\)/);
   assert.doesNotMatch(globalStyles, /\.ambient(?:-[\w-]+)?\s*{/);
 
-  const spectrumRule = globalStyles.match(/\.animated-backdrop::before\s*{[^}]*}/)?.[0] ?? "";
-  assert.doesNotMatch(spectrumRule, /filter:|animation:|will-change:/);
-
-  const glowRule = globalStyles.match(/\.backdrop-glow\s*{[^}]*}/)?.[0] ?? "";
-  const glowPseudoRule = globalStyles.match(/\.backdrop-glow::before,[\s\S]*?\.backdrop-glow::after\s*{[^}]*}/)?.[0] ?? "";
-  assert.doesNotMatch(glowRule, /animation:/);
-  assert.doesNotMatch(glowPseudoRule, /animation:/);
+  const gridRule = globalStyles.match(/\.backdrop-grid\s*{[^}]*}/)?.[0] ?? "";
+  assert.doesNotMatch(gridRule, /filter:|animation:|will-change:/);
+  assert.doesNotMatch(globalStyles, /\.backdrop-glow|\.animated-backdrop::before/);
 
   const topbarRule = globalStyles.match(/\.topbar\s*{[^}]*}/)?.[0] ?? "";
-  assert.match(topbarRule, /^\s*backdrop-filter:\s*blur\(16px\)/m);
-  assert.match(topbarRule, /^\s*-webkit-backdrop-filter:\s*blur\(16px\)/m);
+  assert.match(topbarRule, /^\s*backdrop-filter:\s*none/m);
+  assert.match(topbarRule, /^\s*-webkit-backdrop-filter:\s*none/m);
   assert.doesNotMatch(
-    globalStyles.replace(topbarRule, ""),
+    globalStyles,
     /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm,
   );
   assert.doesNotMatch(primitiveStyles, /^\s*(?:-webkit-)?backdrop-filter:\s*blur/gm);
@@ -922,7 +1223,7 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   );
   const topbarRule = desktopStyles.match(/\.topbar\s*{[^}]*}/)?.[0] ?? "";
   assert.match(topbarRule, /grid-template-areas:\s*"brand project actions"/);
-  assert.match(topbarRule, /grid-template-columns:\s*auto minmax\(160px, 320px\) minmax\(0, 1fr\)/);
+  assert.match(topbarRule, /grid-template-columns:\s*auto minmax\(180px, 1fr\) auto/);
   assert.match(topbarRule, /min-height:\s*60px/);
   assert.match(
     desktopStyles,
@@ -961,12 +1262,16 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
     /\.topbar \.topbar-theme-toggle\.ui-icon-button,[\s\S]*?width:\s*38px[^}]*min-width:\s*38px[^}]*min-height:\s*38px[^}]*height:\s*38px/,
   );
   assert.match(ultraNarrowStyles, /\.file-actions\s*{[^}]*gap:\s*2px/);
+  assert.match(
+    ultraNarrowStyles,
+    /\.topbar \.topbar-utility-actions\s*\{[^}]*display:\s*none/,
+  );
 
   assert.doesNotMatch(compactStyles, /\.topbar \.file-actions \.ui-button__label[\s\S]*?display:\s*none/);
   assert.doesNotMatch(smallTabletStyles, /\.topbar \.file-actions \.ui-button__label[\s\S]*?display:\s*none/);
   assert.match(actionCompactStyles, /\.topbar \.file-actions \.ui-button__label\s*{[^}]*display:\s*none/);
   assert.match(actionCompactStyles, /\.topbar \.file-actions \.button\s*{[^}]*width:\s*44px/);
-  assert.equal(topbarSource.match(/size="md"/g)?.length, 7);
+  assert.equal(topbarSource.match(/size="md"/g)?.length, 8);
   assert.doesNotMatch(topbarSource, /size="lg"/);
   assert.doesNotMatch(topbarSource, /<Switch\b|checkedDescription|uncheckedDescription/);
   assert.match(topbarSource, /className="topbar-planning-toggle"/);
@@ -985,14 +1290,29 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   assert.match(topbarSource, /label=\{`Switch to \$\{theme === "dark" \? "light" : "dark"\} mode`\}/);
   assert.match(topbarSource, /className="theme-toggle-icons"/);
   assert.match(topbarSource, /className="topbar-reset"/);
-  assert.match(topbarSource, /aria-label="Reset all data"/);
+  assert.match(topbarSource, /label="Reset all data"/);
+  assert.match(topbarSource, /className="topbar-utility-actions"/);
   assert.match(topbarSource, /variant="ghost"[\s\S]*?className="topbar-import"/);
   assert.match(topbarSource, /variant="secondary"[\s\S]*?className="topbar-export"/);
+  assert.match(topbarSource, /className="topbar-export"[\s\S]*?className="topbar-assistant"/);
+  assert.match(topbarSource, /aria-controls="project-assistant-drawer"/);
+  assert.match(topbarSource, /aria-expanded=\{assistantOpen\}/);
+  assert.match(topbarSource, /<BotMessageSquare size=\{19\} \/>/);
+  assert.match(topbarSource, /className="topbar-assistant-sparkle"/);
+  assert.doesNotMatch(topbarSource, />\s*Notes & AI\s*</);
   assert.doesNotMatch(topbarSource, /BriefcaseBusiness|Current project|project-identity-icon/);
+
+  const utilityActionRule = globalStyles.match(
+    /\.topbar \.topbar-reset\.ui-icon-button,[\s\S]*?\.topbar \.topbar-import\.ui-icon-button\s*\{[^}]*}/,
+  )?.[0] ?? "";
+  assert.match(utilityActionRule, /width:\s*44px/);
+  assert.match(utilityActionRule, /min-width:\s*44px/);
+  assert.match(utilityActionRule, /min-height:\s*44px/);
+  assert.match(utilityActionRule, /height:\s*44px/);
 
   const projectIdentityRule =
     desktopStyles.match(/\.project-identity\s*{[^}]*}/)?.[0] ?? "";
-  assert.match(projectIdentityRule, /max-width:\s*320px/);
+  assert.match(projectIdentityRule, /max-width:\s*360px/);
   assert.match(projectIdentityRule, /min-height:\s*44px/);
 
   const projectNameRule =
@@ -1007,6 +1327,88 @@ test("the topbar stays compact and single-row until the narrow mobile breakpoint
   assert.match(projectNameInput, /aria-label="Project name"/);
   assert.match(projectNameInput, /title=\{projectName\}/);
   assert.match(projectNameInput, /value=\{projectName\}/);
+});
+
+test("the project assistant stays docked while the workspace remains usable", async () => {
+  const [response, drawerSource, plannerSource, phasesSource, globalStyles] = await Promise.all([
+    renderPage(),
+    readFile(
+      new URL(
+        "../features/project-planner/components/ProjectAssistantDrawer.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../features/project-planner/ProjectPlanner.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../features/project-planner/components/PhasesStaffing.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const html = await response.text();
+
+  assert.match(
+    html,
+    /<button(?=[^>]*\bclass="[^"]*topbar-assistant)(?=[^>]*\baria-label="Open project copilot")(?=[^>]*\baria-expanded="false")[^>]*>/i,
+  );
+  assert.doesNotMatch(visibleText(html), /Notes & AI/i);
+  assert.match(plannerSource, /const \[assistantOpen, setAssistantOpen\] = useState\(false\)/);
+  assert.match(plannerSource, /assistantOpen \? " assistant-dock-open" : ""/);
+  assert.match(plannerSource, /<StablePhasesStaffing[\s\S]*?assistantOpen=\{assistantOpen\}/);
+  assert.match(plannerSource, /patchProject\(\{ assistantNotesMarkdown \}\)/);
+  assert.match(plannerSource, /markdown=\{project\.assistantNotesMarkdown\}/);
+  assert.match(plannerSource, /lazy\(async \(\) => \{[\s\S]*?import\("\.\/components\/ProjectAssistantDrawer"\)/);
+  assert.match(plannerSource, /onMarkdownDraftChange=\{stageAssistantNotes\}/);
+  assert.match(drawerSource, /<aside[\s\S]*?id="project-assistant-drawer"/);
+  assert.match(drawerSource, /aria-labelledby="project-assistant-title"/);
+  assert.match(drawerSource, /<h2 id="project-assistant-title">Notes & AI<\/h2>/);
+  assert.match(drawerSource, /label="Close project copilot"/);
+  assert.match(drawerSource, /event\.key !== "Escape"/);
+  assert.doesNotMatch(drawerSource, /<Modal|modal-backdrop|backdropClassName/);
+  assert.match(drawerSource, /aria-label="Project note in Markdown"/);
+  assert.match(drawerSource, /const NOTE_SAVE_DELAY_MS = 600/);
+  assert.match(drawerSource, /<MarkdownPreview value=\{noteDraft\} \/>/);
+  assert.match(drawerSource, /onBlur=\{\(\) => commitNote\(\)\}/);
+  assert.match(drawerSource, /id="assistant-note-content"/);
+  assert.match(drawerSource, /aria-labelledby=\{`assistant-note-\$\{noteView\}-tab`\}/);
+  assert.match(drawerSource, /disabled=\{!aiConnected\}/);
+  assert.match(drawerSource, /Connect an AI provider to start chatting/);
+  assert.match(
+    globalStyles,
+    /\.project-assistant-layout\s*\{[^}]*grid-template-rows:\s*minmax\(0, 7fr\) minmax\(210px, 3fr\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.project-assistant-dock\s*\{[^}]*position:\s*fixed[^}]*top:\s*12px[^}]*right:\s*12px[^}]*bottom:\s*12px/,
+  );
+  assert.match(
+    globalStyles,
+    /\.app-shell\.assistant-dock-open\s*\{[^}]*padding-right:\s*calc\(var\(--assistant-dock-width\) \+ 24px\)/,
+  );
+  assert.match(phasesSource, /const compactPeopleRail = assistantOpen && maximizedPanel === null/);
+  assert.match(phasesSource, /label=\{railExpanded \? "Collapse people sidebar" : "Expand people sidebar"\}/);
+  assert.match(phasesSource, /document\.addEventListener\("pointerdown", handlePointerDown\)/);
+  assert.match(
+    globalStyles,
+    /\.delivery-workspace\.has-people-rail\s*\{[^}]*grid-template-columns:\s*76px minmax\(0, 1fr\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.people-sidebar\.is-compact\s*\{[^}]*width:\s*300px[^}]*clip-path:\s*inset\(0 224px 0 0 round 18px\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.people-sidebar\.is-compact\.is-rail-expanded\s*\{[^}]*clip-path:\s*inset\(0 round 18px\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.settings-extensions\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/,
+  );
+  assert.doesNotMatch(globalStyles, /\.assistant-dock-open \.settings-extensions/);
 });
 
 test("core pricing features compose the shared UI primitives", async () => {
@@ -1031,6 +1433,10 @@ test("core pricing features compose the shared UI primitives", async () => {
       ["SectionCard", "SummaryCard"],
     ],
     ["../features/project-planner/components/ExportDialog.tsx", ["ActionCard", "Modal"]],
+    [
+      "../features/project-planner/components/ProjectAssistantDrawer.tsx",
+      ["Button", "IconButton", "TextArea"],
+    ],
     [
       "../features/project-planner/components/PersonEditorDialog.tsx",
       ["ColorPicker", "Field", "Modal", "MoneyInput"],

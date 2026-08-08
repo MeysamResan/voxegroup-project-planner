@@ -23,6 +23,24 @@ export const makePerson = (
   color: person.color ?? COLORS[Math.floor(Math.random() * COLORS.length)],
 });
 
+export const nextPersonColor = (
+  people: ReadonlyArray<Pick<Person, "color">>,
+): string => {
+  const usage = new Map(COLORS.map((color) => [color.toLowerCase(), 0]));
+
+  for (const person of people) {
+    const key = person.color.toLowerCase();
+    const count = usage.get(key);
+    if (count !== undefined) usage.set(key, count + 1);
+  }
+
+  return COLORS.reduce((leastUsed, color) => {
+    const leastUsedCount = usage.get(leastUsed.toLowerCase()) ?? 0;
+    const colorCount = usage.get(color.toLowerCase()) ?? 0;
+    return colorCount < leastUsedCount ? color : leastUsed;
+  }, COLORS[0]);
+};
+
 export const initialWorkspace = (): Workspace => {
   const designer = makePerson({
     id: "person-maya-al-safi",
@@ -90,6 +108,17 @@ export const initialWorkspace = (): Workspace => {
     people: [designer, developer, qa, aiContractor, deliveryLead, devops],
     project: {
       projectName: "Customer Operations Platform",
+      assistantNotesMarkdown: [
+        "# Project brief",
+        "",
+        "## Priorities",
+        "- Keep operational workflows simple.",
+        "- Validate Arabic voice quality before launch.",
+        "",
+        "## Open questions",
+        "- [ ] Confirm the migration owner",
+        "- [ ] Agree the UAT sign-off date",
+      ].join("\n"),
       currency: "USD",
       startDate: DEFAULT_START_DATE,
       baseHourlyPrice: 55,
@@ -103,50 +132,255 @@ export const initialWorkspace = (): Workspace => {
         {
           id: "phase-discovery-architecture",
           name: "Discovery & architecture",
+          notes: "Align stakeholders on the operating model, technical constraints, risks, and a delivery-ready scope.",
           days: 5,
           assignments: [
             { personId: designer.id },
             { personId: developer.id },
             { personId: deliveryLead.id },
           ],
+          tasks: [
+            {
+              id: "task-stakeholder-research",
+              name: "Stakeholder interviews & journey audit",
+              notes: "Capture current workflows, pain points, decision owners, and measurable success criteria.",
+              days: 2,
+              assignments: [
+                { personId: designer.id },
+                { personId: deliveryLead.id },
+              ],
+            },
+            {
+              id: "task-technical-architecture",
+              name: "Technical architecture & risk mapping",
+              notes: "Document system boundaries, integration risks, security needs, and architectural decisions.",
+              days: 2,
+              assignments: [
+                { personId: developer.id },
+                { personId: deliveryLead.id },
+              ],
+            },
+            {
+              id: "task-scope-delivery-blueprint",
+              name: "Scope alignment & delivery blueprint",
+              notes: "",
+              days: 1,
+              assignments: [
+                { personId: designer.id },
+                { personId: developer.id },
+                { personId: deliveryLead.id },
+              ],
+            },
+          ],
         },
         {
           id: "phase-service-blueprint-design",
           name: "Service blueprint & product design",
+          notes: "",
           days: 8,
           assignments: [{ personId: designer.id }, { personId: developer.id }],
+          tasks: [
+            {
+              id: "task-service-blueprint",
+              name: "Service blueprint & user flows",
+              notes: "Map frontstage and backstage steps, ownership, handoffs, and exception paths.",
+              days: 3,
+              assignments: [{ personId: designer.id }],
+            },
+            {
+              id: "task-interaction-prototype",
+              name: "Interaction design & prototype",
+              notes: "",
+              days: 3,
+              assignments: [
+                { personId: designer.id },
+                { personId: developer.id },
+              ],
+            },
+            {
+              id: "task-design-validation-handoff",
+              name: "Design validation & engineering handoff",
+              notes: "Resolve validation findings and package states, rules, and assets for implementation.",
+              days: 2,
+              assignments: [
+                { personId: designer.id },
+                { personId: developer.id },
+              ],
+            },
+          ],
         },
         {
           id: "phase-core-platform-build",
           name: "Core platform build",
+          notes: "Implement the production foundation and the priority operations workflows defined during design.",
           days: 18,
           assignments: [{ personId: developer.id }, { personId: devops.id }],
+          tasks: [
+            {
+              id: "task-platform-foundation",
+              name: "Platform foundation & data model",
+              notes: "Establish environments, application structure, access controls, and the initial data model.",
+              days: 4,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+            {
+              id: "task-core-operations-workflows",
+              name: "Core operations workflows",
+              notes: "",
+              days: 7,
+              assignments: [{ personId: developer.id }],
+            },
+            {
+              id: "task-admin-reporting",
+              name: "Admin, permissions & reporting",
+              notes: "Add administrative controls, role-based permissions, and agreed operational reporting.",
+              days: 5,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+            {
+              id: "task-build-stabilization",
+              name: "Stabilization & code review",
+              notes: "",
+              days: 2,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+          ],
         },
         {
           id: "phase-ai-voice-automation",
           name: "AI voice & automation",
+          notes: "Deliver the Arabic voice experience with measurable quality, safe fallbacks, and operational controls.",
           days: 10,
           assignments: [
             { personId: aiContractor.id },
             { personId: developer.id },
             { personId: devops.id },
           ],
+          tasks: [
+            {
+              id: "task-voice-experience",
+              name: "Voice experience & conversation flows",
+              notes: "Define intents, prompts, recovery behavior, escalation paths, and conversation tone.",
+              days: 3,
+              assignments: [
+                { personId: aiContractor.id },
+                { personId: developer.id },
+              ],
+            },
+            {
+              id: "task-arabic-voice-integration",
+              name: "Arabic voice model integration",
+              notes: "Integrate the selected speech services and tune Arabic handling against representative calls.",
+              days: 4,
+              assignments: [
+                { personId: aiContractor.id },
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+            {
+              id: "task-ai-evaluation-safety",
+              name: "Evaluation, safety & fallback tuning",
+              notes: "",
+              days: 3,
+              assignments: [
+                { personId: aiContractor.id },
+                { personId: developer.id },
+              ],
+            },
+          ],
         },
         {
           id: "phase-integrations-data",
           name: "Integrations & data migration",
+          notes: "",
           days: 8,
           assignments: [{ personId: developer.id }, { personId: devops.id }],
+          tasks: [
+            {
+              id: "task-integration-contracts",
+              name: "Integration contracts & data mapping",
+              notes: "Confirm API contracts, ownership, field mappings, data quality rules, and error handling.",
+              days: 2,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+            {
+              id: "task-connector-implementation",
+              name: "Connector implementation",
+              notes: "",
+              days: 3,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+            {
+              id: "task-migration-rehearsal",
+              name: "Data migration rehearsal",
+              notes: "Execute a full dry run, reconcile results, measure timing, and verify rollback steps.",
+              days: 3,
+              assignments: [
+                { personId: developer.id },
+                { personId: devops.id },
+              ],
+            },
+          ],
         },
         {
           id: "phase-qa-uat-launch",
           name: "QA, UAT & launch",
+          notes: "Validate the complete service, secure client acceptance, and release with monitored hypercare.",
           days: 7,
           assignments: [
             { personId: qa.id },
             { personId: developer.id },
             { personId: deliveryLead.id },
             { personId: devops.id },
+          ],
+          tasks: [
+            {
+              id: "task-regression-testing",
+              name: "Test strategy & regression pass",
+              notes: "Run risk-based functional, integration, accessibility, and regression coverage.",
+              days: 3,
+              assignments: [
+                { personId: qa.id },
+                { personId: developer.id },
+              ],
+            },
+            {
+              id: "task-client-uat",
+              name: "Client UAT & release readiness",
+              notes: "",
+              days: 2,
+              assignments: [
+                { personId: qa.id },
+                { personId: deliveryLead.id },
+              ],
+            },
+            {
+              id: "task-production-launch",
+              name: "Production launch & hypercare",
+              notes: "Deploy with monitoring, validate critical journeys, and provide focused post-launch support.",
+              days: 2,
+              assignments: [
+                { personId: developer.id },
+                { personId: deliveryLead.id },
+                { personId: devops.id },
+              ],
+            },
           ],
         },
       ],

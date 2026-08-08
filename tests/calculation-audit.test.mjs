@@ -42,6 +42,7 @@ const makePerson = (id, hourlyCost) => ({
 
 const makeProject = (overrides = {}) => ({
   projectName: "Calculation audit",
+  assistantNotesMarkdown: "",
   currency: "USD",
   startDate: "2026-01-05",
   baseHourlyPrice: 50,
@@ -64,11 +65,14 @@ test("calculation memo keys ignore display edits and track every numeric input",
   const originalKey = calculationInputKey(workspace.project, workspace.people);
   const displayOnly = structuredClone(workspace);
   displayOnly.project.projectName = "Renamed project";
+  displayOnly.project.assistantNotesMarkdown = "# Updated project context";
   displayOnly.project.currency = "EUR";
   displayOnly.project.baseHourlyPriceNotes = "Updated note";
   displayOnly.project.fixedFeeNotes = "Updated note";
   displayOnly.project.adjustmentReason = "Updated reason";
   displayOnly.project.phases[0].name = "Renamed phase";
+  displayOnly.project.phases[0].notes = "Updated phase note";
+  displayOnly.project.phases[0].tasks[0].notes = "Updated sub-phase note";
   displayOnly.project.expenses[0].name = "Renamed expense";
   displayOnly.project.expenses[0].notes = "Updated expense note";
   displayOnly.project.modifiers[0].name = "Renamed modifier";
@@ -83,6 +87,14 @@ test("calculation memo keys ignore display edits and track every numeric input",
     (copy) => { copy.project.holidays = ["2026-08-13"]; },
     (copy) => { copy.project.phases[0].days += 1; },
     (copy) => { copy.project.phases[0].assignments = []; },
+    (copy) => {
+      copy.project.phases[0].tasks = [{
+        id: "task-key",
+        name: "Task",
+        days: copy.project.phases[0].days,
+        assignments: [],
+      }];
+    },
     (copy) => { copy.project.expenses[0].amount += 1; },
     (copy) => { copy.project.modifiers[0].value += 1; },
     (copy) => { copy.people[0].hourlyCost += 1; },
@@ -92,6 +104,57 @@ test("calculation memo keys ignore display edits and track every numeric input",
     change(changed);
     assert.notEqual(calculationInputKey(changed.project, changed.people), originalKey);
   }
+});
+
+test("sub-phase dates fill their parent phase across working days and holidays", () => {
+  const people = [makePerson("a", 10), makePerson("b", 20)];
+  const project = makeProject({
+    holidays: ["2026-01-07"],
+    phases: [{
+      id: "parent-phase",
+      name: "Parent phase",
+      days: 5,
+      assignments: [{ personId: "a" }, { personId: "b" }],
+      tasks: [
+        {
+          id: "task-one",
+          name: "First sub-phase",
+          days: 2,
+          assignments: [{ personId: "a" }],
+        },
+        {
+          id: "task-two",
+          name: "Second sub-phase",
+          days: 3,
+          assignments: [{ personId: "b" }],
+        },
+      ],
+    }],
+  });
+
+  const result = calculateScenario(project, people);
+  const phase = result.phaseResults[0];
+
+  assert.equal(phase.start, "2026-01-05");
+  assert.equal(phase.end, "2026-01-12");
+  assert.deepEqual(phase.taskResults, [
+    {
+      id: "task-one",
+      days: 2,
+      start: "2026-01-05",
+      end: "2026-01-06",
+    },
+    {
+      id: "task-two",
+      days: 3,
+      start: "2026-01-08",
+      end: "2026-01-12",
+    },
+  ]);
+  assert.equal(phase.taskResults[0].start, phase.start);
+  assert.equal(phase.taskResults.at(-1).end, phase.end);
+  assert.equal(phase.rawHours, 40);
+  assert.equal(phase.laborCost, 640);
 });
 
 test("hand-calculated hours, costs, dates, expenses, modifiers, and quote all agree", () => {
@@ -438,6 +501,8 @@ test("workspace normalization enforces every numeric and calendar input contract
   unsafe.project.baseHourlyPrice = -100;
   unsafe.project.fixedFee = -200;
   unsafe.project.defaultHours = 99;
+  unsafe.project.phases[0].tasks = [];
+  unsafe.project.phases[1].tasks = [];
   unsafe.project.phases[0].days = -3;
   unsafe.project.phases[1].days = 2.6;
   unsafe.project.expenses[0].amount = -20;

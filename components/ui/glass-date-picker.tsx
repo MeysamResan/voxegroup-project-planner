@@ -16,16 +16,11 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn, type UiControlSize } from "./utils";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const calendarMonthFormat = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
-const calendarDateFormat = new Intl.DateTimeFormat("en-US", {
+const calendarMonthFormat = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" });
+const calendarDateFormat = new Intl.DateTimeFormat("en-GB", {
   weekday: "long",
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-});
-const triggerDateFormat = new Intl.DateTimeFormat("en", {
-  month: "short",
-  day: "numeric",
+  day: "2-digit",
+  month: "2-digit",
   year: "numeric",
 });
 
@@ -46,6 +41,12 @@ function dateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function displayDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
 }
 
 function addDays(date: Date, amount: number): Date {
@@ -85,7 +86,7 @@ export function GlassDatePicker({
   max,
   min,
   onChange,
-  placeholder = "Select date",
+  placeholder = "DD/MM/YYYY",
   size = "md",
   value,
 }: GlassDatePickerProps) {
@@ -398,7 +399,7 @@ export function GlassDatePicker({
         }}
       >
         <span className={selectedDate ? undefined : "placeholder"}>
-          {selectedDate ? triggerDateFormat.format(selectedDate) : placeholder}
+          {selectedDate ? displayDate(selectedDate) : placeholder}
         </span>
         <CalendarDays size={16} aria-hidden="true" />
       </button>

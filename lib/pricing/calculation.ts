@@ -24,6 +24,11 @@ export const calculationInputKey = (
     phase.id,
     phase.days,
     phase.assignments.map((assignment) => assignment.personId),
+    (phase.tasks ?? []).map((task) => [
+      task.id,
+      task.days,
+      task.assignments.map((assignment) => assignment.personId),
+    ]),
   ]),
   scenario.expenses.map((expense) => [
     expense.id,
@@ -52,24 +57,71 @@ export function calculateScenario(
   let workingOffset = 0;
   const rawPhaseData = scenario.phases.map((phase) => {
     const days = wholeNonNegative(phase.days);
-    const assignedPeople = Array.from(new Set(
+    const phaseAssignedPeople = Array.from(new Set(
       phase.assignments.map((assignment) => assignment.personId),
     )).flatMap((personId) => {
       const person = personMap.get(personId);
       return person ? [person] : [];
     });
-    const assignedRateTotal = assignedPeople.reduce(
+    const phaseAssignedPersonIds = new Set(
+      phaseAssignedPeople.map((person) => person.id),
+    );
+    const phaseAssignedRateTotal = phaseAssignedPeople.reduce(
       (sum, person) => sum + nonNegative(person.hourlyCost),
       0,
     );
-    const averageRate = assignedPeople.length > 0
-      ? assignedRateTotal / assignedPeople.length
+    const phaseTasks = phase.tasks ?? [];
+    const taskEffortData = phaseTasks.map((task) => {
+      const taskDays = wholeNonNegative(task.days);
+      const assignedPeople = Array.from(new Set(
+        task.assignments.map((assignment) => assignment.personId),
+      )).flatMap((personId) => {
+        if (!phaseAssignedPersonIds.has(personId)) return [];
+        const person = personMap.get(personId);
+        return person ? [person] : [];
+      });
+      const assignedRateTotal = assignedPeople.reduce(
+        (sum, person) => sum + nonNegative(person.hourlyCost),
+        0,
+      );
+      return {
+        assignedPeople,
+        days: taskDays,
+        rawHours: taskDays * defaultHours * assignedPeople.length,
+        rawCost: taskDays * defaultHours * assignedRateTotal,
+      };
+    });
+    const rawHours = phaseTasks.length
+      ? taskEffortData.reduce((sum, task) => sum + task.rawHours, 0)
+      : days * defaultHours * phaseAssignedPeople.length;
+    const rawCost = phaseTasks.length
+      ? taskEffortData.reduce((sum, task) => sum + task.rawCost, 0)
+      : days * defaultHours * phaseAssignedRateTotal;
+    const averageRate = rawHours > 0
+      ? rawCost / rawHours
+      : phaseAssignedPeople.length > 0
+        ? phaseAssignedRateTotal / phaseAssignedPeople.length
       : 0;
-    const rawHours = days * defaultHours * assignedPeople.length;
-    const rawCost = days * defaultHours * assignedRateTotal;
     const startScheduleIndex = days > 0
       ? scheduleOffsets.push(workingOffset) - 1
       : -1;
+    let taskWorkingOffset = workingOffset;
+    const taskScheduleData = phaseTasks.map((task) => {
+      const taskDays = wholeNonNegative(task.days);
+      const taskStartScheduleIndex = taskDays > 0
+        ? scheduleOffsets.push(taskWorkingOffset) - 1
+        : -1;
+      const taskEndScheduleIndex = taskDays > 0
+        ? scheduleOffsets.push(taskWorkingOffset + taskDays - 1) - 1
+        : -1;
+      taskWorkingOffset += taskDays;
+      return {
+        id: task.id,
+        days: taskDays,
+        startScheduleIndex: taskStartScheduleIndex,
+        endScheduleIndex: taskEndScheduleIndex,
+      };
+    });
     const endScheduleIndex = days > 0
       ? scheduleOffsets.push(workingOffset + days - 1) - 1
       : -1;
@@ -79,9 +131,13 @@ export function calculateScenario(
       rawHours,
       rawCost,
       averageRate,
-      assignedPeopleCount: assignedPeople.length,
+      assignedPeopleCount: phaseAssignedPeople.length,
+      hasUnstaffedTask: taskEffortData.some(
+        (task) => task.days > 0 && task.assignedPeople.length === 0,
+      ),
       startScheduleIndex,
       endScheduleIndex,
+      taskScheduleData,
     };
   });
 
@@ -159,6 +215,12 @@ export function calculateScenario(
       revenue: adjustedHours * baseHourlyPrice,
       start: scheduleKeyAt(raw.startScheduleIndex),
       end: scheduleKeyAt(raw.endScheduleIndex),
+      taskResults: raw.taskScheduleData.map((task) => ({
+        id: task.id,
+        days: task.days,
+        start: scheduleKeyAt(task.startScheduleIndex),
+        end: scheduleKeyAt(task.endScheduleIndex),
+      })),
     };
   });
 
@@ -221,6 +283,9 @@ export function calculateScenario(
   }
   if (rawPhaseData.some((phase) => phase.assignedPeopleCount === 0)) {
     planningWarnings.push("One or more phases have no people assigned.");
+  }
+  if (rawPhaseData.some((phase) => phase.hasUnstaffedTask)) {
+    planningWarnings.push("One or more sub-phases have no people assigned.");
   }
   if (totalWorkingDays > 0 && hasWorkingDay && (!projectStart || !projectEnd)) {
     planningWarnings.push("The delivery calendar could not be resolved.");

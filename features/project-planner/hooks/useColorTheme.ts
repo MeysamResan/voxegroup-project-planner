@@ -11,18 +11,6 @@ export type ColorTheme = "light" | "dark";
 
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: light)";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-const FALLBACK_TRANSITION_DURATION_MS = 1_250;
-const MAX_THEME_TRANSITION_LAYERS = 3;
-const MAX_THEME_LAYER_VIEWPORT_RATIO = 0.6;
-const THEME_TRANSITION_LAYERS = [
-  { selector: ".topbar", name: "theme-topbar" },
-  { selector: ".metric-grid", name: "theme-overview" },
-  { selector: ".warning-strip", name: "theme-warning" },
-  { selector: ".settings-card", name: "theme-settings" },
-  { selector: ".phases-card", name: "theme-phases" },
-  { selector: ".decision-card", name: "theme-decision" },
-  { selector: ".client-sheet", name: "theme-client" },
-] as const;
 
 interface ThemeViewTransition {
   finished: Promise<void>;
@@ -31,11 +19,6 @@ interface ThemeViewTransition {
 type ThemeTransitionDocument = Document & {
   startViewTransition?: (update: () => void) => ThemeViewTransition;
 };
-
-interface PreparedThemeLayer {
-  element: HTMLElement;
-  previousName: string;
-}
 
 const resolveSystemTheme = (query: MediaQueryList): ColorTheme =>
   query.matches ? "light" : "dark";
@@ -54,20 +37,9 @@ export interface ColorThemeState {
 export function useColorTheme(): ColorThemeState {
   const [systemTheme, setSystemTheme] = useState<ColorTheme>("dark");
   const [themeOverride, setThemeOverride] = useState<ColorTheme | null>(null);
-  const fallbackTimeoutRef = useRef<number | null>(null);
   const motionPausedRef = useRef(false);
-  const transitionLayersRef = useRef<PreparedThemeLayer[]>([]);
   const transitionIdRef = useRef(0);
   const theme = themeOverride ?? systemTheme;
-
-  const restoreTransitionLayers = useCallback(() => {
-    for (const { element, previousName } of transitionLayersRef.current) {
-      element.classList.remove("theme-transition-layer");
-      if (previousName) element.style.setProperty("view-transition-name", previousName);
-      else element.style.removeProperty("view-transition-name");
-    }
-    transitionLayersRef.current = [];
-  }, []);
 
   const pauseAppMotion = useCallback(() => {
     if (motionPausedRef.current) return;
@@ -81,53 +53,11 @@ export function useColorTheme(): ColorThemeState {
     window.dispatchEvent(new Event(APP_MOTION_RESUME_EVENT));
   }, []);
 
-  const clearTransitionPresentation = useCallback((transitionId?: number) => {
+  const clearThemeTransition = useCallback((transitionId?: number) => {
     if (transitionId !== undefined && transitionId !== transitionIdRef.current) return;
-
-    if (fallbackTimeoutRef.current !== null) {
-      window.clearTimeout(fallbackTimeoutRef.current);
-      fallbackTimeoutRef.current = null;
-    }
-
-    const root = document.documentElement;
-    root.classList.remove("theme-transition-active", "theme-transition-fallback");
-    restoreTransitionLayers();
+    document.documentElement.classList.remove("theme-transition-active");
     resumeAppMotion();
-  }, [restoreTransitionLayers, resumeAppMotion]);
-
-  const prepareTransitionLayers = useCallback(() => {
-    restoreTransitionLayers();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const maximumLayerArea = viewportWidth * viewportHeight * MAX_THEME_LAYER_VIEWPORT_RATIO;
-
-    // Read every box before writing transition names. This avoids repeated
-    // synchronous layout and excludes large or off-screen snapshot surfaces.
-    const preparedLayers = THEME_TRANSITION_LAYERS.flatMap(({ selector, name }) => {
-      const element = document.querySelector<HTMLElement>(selector);
-      if (!element) return [];
-      const bounds = element.getBoundingClientRect();
-      const intersectsViewport = bounds.right > 0
-        && bounds.bottom > 0
-        && bounds.left < viewportWidth
-        && bounds.top < viewportHeight;
-      if (!intersectsViewport || bounds.width * bounds.height > maximumLayerArea) return [];
-      const currentName = element.style.getPropertyValue("view-transition-name");
-
-      return [{
-        element,
-        name,
-        previousName: currentName === "active-panel" ? "" : currentName,
-      }];
-    }).slice(0, MAX_THEME_TRANSITION_LAYERS);
-
-    for (const { element, name } of preparedLayers) {
-      element.classList.add("theme-transition-layer");
-      element.style.setProperty("view-transition-name", name);
-    }
-
-    transitionLayersRef.current = preparedLayers;
-  }, [restoreTransitionLayers]);
+  }, [resumeAppMotion]);
 
   useEffect(() => {
     const query = window.matchMedia(SYSTEM_THEME_QUERY);
@@ -141,10 +71,10 @@ export function useColorTheme(): ColorThemeState {
   useEffect(
     () => () => {
       transitionIdRef.current += 1;
-      clearTransitionPresentation();
+      clearThemeTransition();
       delete document.documentElement.dataset.theme;
     },
-    [clearTransitionPresentation],
+    [clearThemeTransition],
   );
 
   const applyOverride = useCallback((nextTheme: ColorTheme | null) => {
@@ -157,32 +87,22 @@ export function useColorTheme(): ColorThemeState {
     const nextTheme = theme === "dark" ? "light" : "dark";
 
     transitionIdRef.current += 1;
-    clearTransitionPresentation();
+    clearThemeTransition();
 
     if (window.matchMedia(REDUCED_MOTION_QUERY).matches) {
       applyOverride(nextTheme);
       return;
     }
 
-    pauseAppMotion();
     const transitionId = transitionIdRef.current;
     const root = document.documentElement;
-    const finishTransition = () => clearTransitionPresentation(transitionId);
-    const runFallbackTransition = () => {
-      root.classList.remove("theme-transition-active");
-      root.classList.add("theme-transition-fallback");
-      applyOverride(nextTheme);
-      fallbackTimeoutRef.current = window.setTimeout(
-        finishTransition,
-        FALLBACK_TRANSITION_DURATION_MS,
-      );
-    };
+    const finishTransition = () => clearThemeTransition(transitionId);
     const transitionDocument = document as ThemeTransitionDocument;
 
-    prepareTransitionLayers();
-
+    pauseAppMotion();
     if (typeof transitionDocument.startViewTransition !== "function") {
-      runFallbackTransition();
+      applyOverride(nextTheme);
+      finishTransition();
       return;
     }
 
@@ -193,21 +113,16 @@ export function useColorTheme(): ColorThemeState {
       });
       void transition.finished.then(finishTransition, finishTransition);
     } catch {
-      runFallbackTransition();
+      finishTransition();
+      applyOverride(nextTheme);
     }
-  }, [
-    applyOverride,
-    clearTransitionPresentation,
-    pauseAppMotion,
-    prepareTransitionLayers,
-    theme,
-  ]);
+  }, [applyOverride, clearThemeTransition, pauseAppMotion, theme]);
 
   const resetTheme = useCallback(() => {
     transitionIdRef.current += 1;
-    clearTransitionPresentation();
+    clearThemeTransition();
     applyOverride(null);
-  }, [applyOverride, clearTransitionPresentation]);
+  }, [applyOverride, clearThemeTransition]);
 
   return {
     theme,

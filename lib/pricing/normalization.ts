@@ -25,6 +25,7 @@ import type {
   Person,
   PersonType,
   Phase,
+  PhaseTask,
   ProjectPlan,
   Workspace,
 } from "./types.ts";
@@ -128,6 +129,29 @@ const normalizeAssignments = (
   });
 };
 
+const normalizePhaseTasks = (
+  value: unknown,
+  fallbackPhaseDays: number,
+  validPersonIds?: ReadonlySet<string>,
+): PhaseTask[] => {
+  if (!Array.isArray(value)) return [];
+  const usedIds = new Set<string>();
+  let validTaskIndex = 0;
+
+  return value.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const fallbackDays = validTaskIndex === 0 ? fallbackPhaseDays : 0;
+    validTaskIndex += 1;
+    return [{
+      id: uniqueId(item.id, "task", index, usedIds),
+      name: stringOr(item.name, "Untitled task"),
+      notes: stringOr(item.notes),
+      days: wholeNonNegativeFiniteOr(item.days, fallbackDays),
+      assignments: normalizeAssignments(item.assignments, validPersonIds),
+    }];
+  });
+};
+
 const normalizePhases = (
   value: unknown[],
   validPersonIds?: ReadonlySet<string>,
@@ -135,12 +159,21 @@ const normalizePhases = (
   const usedIds = new Set<string>();
   return value.flatMap((item, index) => {
     if (!isRecord(item)) return [];
+    const importedDays = wholeNonNegativeFiniteOr(item.days, 0);
+    const assignments = normalizeAssignments(item.assignments, validPersonIds);
+    const assignedPersonIds = new Set(assignments.map(({ personId }) => personId));
+    const tasks = normalizePhaseTasks(item.tasks, importedDays, assignedPersonIds);
+
     return [{
       id: uniqueId(item.id, "phase", index, usedIds),
       name: stringOr(item.name, "Untitled phase"),
-      days: wholeNonNegativeFiniteOr(item.days, 0),
+      notes: stringOr(item.notes),
+      days: tasks.length
+        ? tasks.reduce((sum, task) => sum + task.days, 0)
+        : importedDays,
       // Legacy schedule and per-assignment hours are intentionally discarded.
-      assignments: normalizeAssignments(item.assignments, validPersonIds),
+      assignments,
+      tasks,
     }];
   });
 };
@@ -191,7 +224,7 @@ export const isProjectPlan = (value: unknown): value is ProjectPlanRecord => {
 };
 
 /**
- * Migrates any supported legacy project shape to schema v7 and removes unknown
+ * Migrates any supported legacy project shape to the current schema and removes unknown
  * fields. Pass the normalized people IDs to also remove orphan assignments.
  */
 export const normalizeProjectPlan = (
@@ -218,6 +251,7 @@ export const normalizeProjectPlan = (
 
   return {
     projectName: value.projectName,
+    assistantNotesMarkdown: stringOr(value.assistantNotesMarkdown),
     currency: normalizeCurrency(value.currency),
     startDate: calendarDateFromString(value.startDate) ? value.startDate : DEFAULT_START_DATE,
     baseHourlyPrice: nonNegativeFiniteOr(legacyBaseHourlyPrice, 0),
